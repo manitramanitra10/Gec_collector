@@ -12,12 +12,31 @@ export function loadProjectEnv() {
   loadEnv({ path: [join(rootDir, ".env.local"), join(rootDir, ".env")], quiet: true })
 }
 
+/** Lit DATABASE_URL (ou POSTGRES_URL) et explique les erreurs de forme les plus courantes. */
 export function getConnectionString() {
   const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL
   if (!url) {
     console.error("DATABASE_URL manquante : copiez .env.example vers .env.local et renseignez la connexion.")
     process.exit(1)
   }
+
+  const placeholder = url.match(/<[^>]+>|\[YOUR-PASSWORD\]/)
+  if (placeholder) {
+    console.error(`DATABASE_URL contient encore un espace réservé : ${placeholder[0]}`)
+    console.error("Copiez la chaîne complète depuis Supabase (bouton Connect > URI > Transaction pooler) et remplacez-le.")
+    process.exit(1)
+  }
+
+  try {
+    new URL(url)
+  } catch {
+    console.error("DATABASE_URL n'est pas une URL valide.")
+    console.error("Si le mot de passe contient des caractères spéciaux, encodez-les :")
+    console.error("  @ -> %40   & -> %26   ? -> %3F   * -> %2A   # -> %23   / -> %2F   : -> %3A   espace -> %20")
+    console.error('Exemple : node -e "console.log(encodeURIComponent(\'mot de passe\'))" donne la forme encodée.')
+    process.exit(1)
+  }
+
   return url
 }
 
