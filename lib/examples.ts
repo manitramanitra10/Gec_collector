@@ -8,8 +8,18 @@ export const VALIDATE_THRESHOLD = 1
 /** Nombre de votes négatifs requis pour passer un exemple en `rejected`. */
 export const REJECT_THRESHOLD = 1
 
+// Toutes les requêtes filtrent sur is_delete = false : une ligne supprimée
+// logiquement n'est jamais lue, comptée ni modifiée.
 const EXAMPLE_COLUMNS =
-  "id, incorrect_text, correct_text, tags, source, status, votes_up, votes_down, created_at"
+  "id, incorrect_text, correct_text, tags, source, status, votes_up, votes_down, is_delete, created_at, deleted_at"
+
+function toIso(value: unknown): string {
+  return value instanceof Date ? value.toISOString() : String(value)
+}
+
+function toIsoOrNull(value: unknown): string | null {
+  return value == null ? null : toIso(value)
+}
 
 function toExample(row: QueryResultRow): Example {
   return {
@@ -21,7 +31,9 @@ function toExample(row: QueryResultRow): Example {
     status: row.status,
     votes_up: row.votes_up,
     votes_down: row.votes_down,
-    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : String(row.created_at),
+    is_delete: row.is_delete,
+    created_at: toIso(row.created_at),
+    deleted_at: toIsoOrNull(row.deleted_at),
   }
 }
 
@@ -50,7 +62,7 @@ export async function listPendingExamples(limit = 20): Promise<Example[]> {
   const { rows } = await getPool().query(
     `SELECT ${EXAMPLE_COLUMNS}
      FROM examples
-     WHERE status = 'pending'
+     WHERE is_delete = false AND status = 'pending'
      ORDER BY created_at DESC
      LIMIT $1`,
     [limit],
@@ -59,11 +71,12 @@ export async function listPendingExamples(limit = 20): Promise<Example[]> {
 }
 
 export async function listExamples(filter: ExampleFilter): Promise<Example[]> {
-  const where = filter === "all" ? "" : "WHERE status = $1"
-  const params = filter === "all" ? [] : [filter]
   const { rows } = await getPool().query(
-    `SELECT ${EXAMPLE_COLUMNS} FROM examples ${where} ORDER BY created_at DESC`,
-    params,
+    `SELECT ${EXAMPLE_COLUMNS}
+     FROM examples
+     WHERE is_delete = false ${filter === "all" ? "" : "AND status = $1"}
+     ORDER BY created_at DESC`,
+    filter === "all" ? [] : [filter],
   )
   return rows.map(toExample)
 }
@@ -71,13 +84,13 @@ export async function listExamples(filter: ExampleFilter): Promise<Example[]> {
 export async function getStats(): Promise<Stats> {
   const { rows } = await getPool().query(`
     SELECT
-      (SELECT count(*) FROM examples)                            AS total,
-      (SELECT count(*) FROM examples WHERE status = 'validated') AS validated,
-      (SELECT count(*) FROM examples WHERE status = 'pending')   AS pending,
-      (SELECT count(*) FROM examples WHERE status = 'rejected')  AS rejected,
-      (SELECT count(*) FROM votes)                               AS total_votes,
-      (SELECT coalesce(sum(votes_up), 0) FROM examples)          AS total_votes_up,
-      (SELECT coalesce(sum(votes_down), 0) FROM examples)        AS total_votes_down
+      (SELECT count(*) FROM examples WHERE is_delete = false)                           AS total,
+      (SELECT count(*) FROM examples WHERE is_delete = false AND status = 'validated')  AS validated,
+      (SELECT count(*) FROM examples WHERE is_delete = false AND status = 'pending')    AS pending,
+      (SELECT count(*) FROM examples WHERE is_delete = false AND status = 'rejected')   AS rejected,
+      (SELECT count(*) FROM votes WHERE is_delete = false)                              AS total_votes,
+      (SELECT coalesce(sum(votes_up), 0) FROM examples WHERE is_delete = false)         AS total_votes_up,
+      (SELECT coalesce(sum(votes_down), 0) FROM examples WHERE is_delete = false)       AS total_votes_down
   `)
   const r = rows[0]
   // count() et sum() renvoient des bigint, que pg sérialise en chaînes.
@@ -100,7 +113,8 @@ export type VoteResult =
 /**
  * Enregistre un vote et met à jour les compteurs et le statut de l'exemple
  * dans une seule transaction. L'incrément se fait côté SQL, donc deux votes
- * simultanés ne peuvent pas s'écraser.
+ * simultanés ne peuvent pas s'écraser. Un exemple supprimé logiquement est
+ * traité comme introuvable.
  */
 export async function castVote(exampleId: string, voterHash: string, vote: 1 | -1): Promise<VoteResult> {
   const client = await getPool().connect()
@@ -126,10 +140,16 @@ export async function castVote(exampleId: string, voterHash: string, vote: 1 | -
            WHEN votes_up + $2 >= $4 THEN 'validated'
            ELSE status
          END
-       WHERE id = $1
+       WHERE id = $1 AND is_delete = false
        RETURNING ${EXAMPLE_COLUMNS}`,
       [exampleId, up, down, VALIDATE_THRESHOLD, REJECT_THRESHOLD],
     )
+
+    if (rows.length === 0) {
+      // Exemple supprimé logiquement : on annule aussi l'insertion du vote.
+      await client.query("ROLLBACK")
+      return { outcome: "not_found" }
+    }
 
     await client.query("COMMIT")
     return { outcome: "recorded", example: toExample(rows[0]) }
@@ -139,6 +159,40 @@ export async function castVote(exampleId: string, voterHash: string, vote: 1 | -
       if (err.code === "23505") return { outcome: "duplicate" }
       if (err.code === "23503") return { outcome: "not_found" }
     }
+    throw err
+  } finally {
+    client.release()
+  }
+}
+
+/**
+ * Suppression logique d'un exemple et de ses votes, dans une même transaction.
+ * Jamais de DELETE physique. Renvoie false si l'exemple n'existe pas ou est
+ * déjà supprimé. Aucune page ne l'appelle encore : à exposer derrière une
+ * vérification d'accès avant toute utilisation.
+ */
+export async function softDeleteExample(exampleId: string): Promise<boolean> {
+  const client = await getPool().connect()
+  try {
+    await client.query("BEGIN")
+    const { rowCount } = await client.query(
+      `UPDATE examples SET is_delete = true, deleted_at = NOW()
+       WHERE id = $1 AND is_delete = false`,
+      [exampleId],
+    )
+    if (!rowCount) {
+      await client.query("ROLLBACK")
+      return false
+    }
+    await client.query(
+      `UPDATE votes SET is_delete = true, deleted_at = NOW()
+       WHERE example_id = $1 AND is_delete = false`,
+      [exampleId],
+    )
+    await client.query("COMMIT")
+    return true
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {})
     throw err
   } finally {
     client.release()

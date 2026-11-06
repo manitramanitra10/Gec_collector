@@ -14,6 +14,7 @@ Les contributeurs soumettent des exemples de façon anonyme, des relecteurs les 
 - [Scripts](#scripts)
 - [Structure du projet](#structure-du-projet)
 - [Architecture](#architecture)
+- [Authentification](#authentification)
 - [Parcours utilisateur](#parcours-utilisateur)
 - [Modèle de données](#modèle-de-données)
 - [Formats d'export](#formats-dexport)
@@ -37,6 +38,7 @@ Les contributeurs soumettent des exemples de façon anonyme, des relecteurs les 
 | Langage | TypeScript 5 |
 | Base de données | PostgreSQL 13 ou plus, accès via `pg` (node-postgres) |
 | Validation | zod (entrées des server actions) |
+| Authentification | Auth0 (connexion Google) via `@auth0/nextjs-auth0` v4 |
 | Styles | Tailwind CSS v4, variables CSS `oklch` |
 | Composants | shadcn/ui (style `new-york`), Radix UI, `lucide-react` |
 | Analytics | `@vercel/analytics` |
@@ -48,6 +50,7 @@ Le projet a été initialement généré avec [v0.app](https://v0.app) sur Supab
 - Node.js 20 ou supérieur
 - Yarn (le lockfile de référence est `yarn.lock` ; `pnpm-lock.yaml` est un fichier vide)
 - Un serveur PostgreSQL 13 ou plus, accessible localement (service Windows, Homebrew, apt, etc.)
+- Un compte Auth0 (le plan Free suffit) avec une application de type « Regular Web Application », voir [Authentification](#authentification)
 
 ## Installation
 
@@ -58,10 +61,16 @@ yarn install
 cp .env.example .env.local
 ```
 
-Adaptez ensuite la chaîne de connexion dans `.env.local` :
+Renseignez ensuite `.env.local` : la connexion PostgreSQL et les cinq variables Auth0 (détail dans [Authentification](#authentification)) :
 
 ```
 DATABASE_URL=postgresql://postgres:MOT_DE_PASSE@localhost:5432/gec_collector
+
+AUTH0_DOMAIN=votre-tenant.eu.auth0.com
+AUTH0_CLIENT_ID=...
+AUTH0_CLIENT_SECRET=...
+AUTH0_SECRET=<openssl rand -hex 32>
+APP_BASE_URL=http://localhost:3000
 ```
 
 Créez la base, le schéma et quelques exemples de démonstration, puis lancez le serveur :
@@ -107,6 +116,10 @@ Le compte utilisé dans `DATABASE_URL` doit pouvoir créer la base (ou la base d
 | `POSTGRES_URL` | Solution de repli si `DATABASE_URL` est absente ; c'est la variable posée par l'intégration Supabase ↔ Vercel. |
 | `DATABASE_SSL` | `disable` (défaut si l'hôte est local), `require` (défaut sinon : chiffré, certificat non vérifié) ou `verify-full` (certificat vérifié). |
 | `DATABASE_SSL_CA` | Autorité de certification au format PEM, utilisée avec `verify-full`. |
+| `AUTH0_DOMAIN` | Domaine du tenant Auth0, ex. `mon-tenant.eu.auth0.com`. |
+| `AUTH0_CLIENT_ID` / `AUTH0_CLIENT_SECRET` | Identifiants de l'application Auth0. |
+| `AUTH0_SECRET` | Clé de chiffrement du cookie de session (`openssl rand -hex 32`). |
+| `APP_BASE_URL` | URL publique de l'application, sans slash final. |
 
 Ces variables n'ont pas de préfixe `NEXT_PUBLIC_` : elles ne sont jamais exposées au navigateur.
 
@@ -145,6 +158,7 @@ hooks/
   use-mobile.ts       Détection mobile (breakpoint 768 px)
   use-toast.ts        Store de toasts
 lib/
+  auth0.ts            Client Auth0 et lecture de la session
   db.ts               Pool de connexions pg (serveur uniquement)
   examples.ts         Requêtes SQL : création, listes, statistiques, vote transactionnel
   types.ts            Types Example, Vote, Stats, ExampleFilter
@@ -154,11 +168,14 @@ scripts/
   002_seed.sql           Données de démonstration
   db-setup.mjs           Création de la base et application des scripts SQL
 public/               Icônes et images
+proxy.ts              Garde d'entrée : redirige vers /auth/login sans session
 ```
 
 ## Architecture
 
 ```
+proxy.ts              session Auth0 obligatoire sur tout le site (sauf /auth/* et fichiers statiques)
+   ▼
 Navigateur (pages "use client")
    │  appel de server action
    ▼
@@ -175,6 +192,29 @@ PostgreSQL
 - `lib/db.ts` et `lib/examples.ts` importent `server-only` : les importer depuis un composant client fait échouer le build.
 - Les server actions renvoient des objets plutôt que de lever des exceptions, car Next.js masque les messages d'erreur côté client en production.
 - `pg` est déclaré dans `serverExternalPackages` de `next.config.mjs` pour être chargé par Node sans être bundlé.
+
+## Authentification
+
+L'entrée du site est réservée aux utilisateurs connectés avec un compte Google, via Auth0. Les codes d'accès de la validation et de l'export restent un verrou distinct, appliqué après la connexion.
+
+### Fonctionnement
+
+- [proxy.ts](proxy.ts) s'exécute sur chaque requête (hors fichiers statiques). Il laisse passer les routes `/auth/*`, montées par le SDK (`/auth/login`, `/auth/callback`, `/auth/logout`, `/auth/profile`), et redirige toute autre requête sans session vers `/auth/login?returnTo=<page demandée>`.
+- [lib/auth0.ts](lib/auth0.ts) instancie le client Auth0 avec `connection: "google-oauth2"` : le visiteur arrive directement sur Google, sans écran de choix Auth0. Supprimez cette option pour proposer toutes les connexions activées sur le tenant.
+- La session est un cookie chiffré avec `AUTH0_SECRET`. Le layout la lit pour afficher le nom, l'avatar et le lien de déconnexion dans l'en-tête ; les server actions la revérifient avant toute requête SQL.
+- Le lien de déconnexion est une balise `<a>` brute : un `<Link>` Next.js préchargerait `/auth/logout` et déconnecterait l'utilisateur.
+- Tout compte Google est accepté. Pour restreindre (par exemple au domaine `sonapar.mg`), ajoutez une Action post-login dans Auth0 qui refuse les autres adresses.
+
+### Configuration du tenant Auth0
+
+1. Créer une application de type **Regular Web Application**.
+2. Dans ses *Settings*, renseigner :
+   - *Allowed Callback URLs* : `http://localhost:3000/auth/callback` (et l'URL de production, `https://<domaine>/auth/callback`)
+   - *Allowed Logout URLs* : `http://localhost:3000` (et `https://<domaine>`)
+3. Copier *Domain*, *Client ID* et *Client Secret* dans `.env.local`.
+4. Dans *Authentication → Social*, vérifier que **Google** est activé et coché pour l'application. Auth0 fournit des clés Google de développement ; pour la production, créer un client OAuth dans Google Cloud Console et saisir son ID et son secret dans la connexion Google d'Auth0.
+
+Le plan Free d'Auth0 couvre 25 000 utilisateurs actifs par mois et les connexions sociales sans limite.
 
 ## Parcours utilisateur
 
@@ -204,6 +244,20 @@ Les champs « Phrase incorrecte » et « Phrase corrigée » sont obligatoires (
 
 ## Modèle de données
 
+### Table mère `base_entity`
+
+Toutes les tables métier héritent de `base_entity` (héritage PostgreSQL, `INHERITS`) et possèdent donc ces colonnes en plus des leurs :
+
+| Colonne | Type | Description |
+|---|---|---|
+| `is_delete` | `boolean` | `true` si la ligne est supprimée logiquement (défaut `false`) |
+| `created_at` | `timestamptz` | Date de création |
+| `deleted_at` | `timestamptz` | Date de suppression logique, `null` sinon |
+
+**Suppression logique uniquement.** Aucune ligne n'est jamais effacée avec `DELETE` : supprimer revient à poser `is_delete = true` et `deleted_at = NOW()`, et toutes les requêtes de l'application filtrent sur `is_delete = false`. La fonction `softDeleteExample()` de [lib/examples.ts](lib/examples.ts) marque un exemple et ses votes dans une même transaction ; aucune page ne l'appelle encore, elle devra être exposée derrière une vérification d'accès.
+
+Rappels sur l'héritage PostgreSQL : les clés primaires, contraintes d'unicité et clés étrangères ne sont pas héritées, chaque table déclare les siennes ; une colonne ajoutée à `base_entity` apparaît automatiquement dans toutes les tables filles.
+
 ### Table `examples`
 
 | Colonne | Type | Description |
@@ -216,7 +270,8 @@ Les champs « Phrase incorrecte » et « Phrase corrigée » sont obligatoires (
 | `status` | `text` | `pending`, `validated` ou `rejected` (défaut `pending`) |
 | `votes_up` | `integer` | Nombre de votes positifs |
 | `votes_down` | `integer` | Nombre de votes négatifs |
-| `created_at` | `timestamptz` | Date de création |
+
+Plus les colonnes héritées de `base_entity`.
 
 ### Table `votes`
 
@@ -226,11 +281,30 @@ Les champs « Phrase incorrecte » et « Phrase corrigée » sont obligatoires (
 | `example_id` | `uuid` | Référence `examples.id`, suppression en cascade |
 | `voter_hash` | `text` | Identifiant anonyme du votant |
 | `vote` | `integer` | `1` (valider) ou `-1` (rejeter) |
-| `created_at` | `timestamptz` | Date du vote |
 
-Contrainte d'unicité sur `(example_id, voter_hash)`.
+Plus les colonnes héritées de `base_entity`. Contrainte d'unicité sur `(example_id, voter_hash)`, qui reste valable pour un vote supprimé logiquement : le même navigateur ne peut pas revoter sur cet exemple.
 
-Les types TypeScript correspondants sont déclarés dans [lib/types.ts](lib/types.ts) et doivent être maintenus à la main en cas d'évolution du schéma.
+### Table `secrets`
+
+| Colonne | Type | Description |
+|---|---|---|
+| `type` | `text` | Clé primaire : `validate` (page de validation) ou `export` (téléchargement) |
+| `code` | `text` | Code d'accès en clair |
+| `updated_at` | `timestamptz` | Date de dernière modification, à mettre à jour manuellement |
+
+Plus les colonnes héritées de `base_entity`.
+
+Le schéma insère les deux codes initiaux avec `ON CONFLICT DO NOTHING` : un code modifié en base n'est pas écrasé quand le script est rejoué. Pour changer un code :
+
+```sql
+UPDATE secrets SET code = 'nouveau_code', updated_at = NOW() WHERE type = 'validate';
+```
+
+Les types TypeScript correspondants sont déclarés dans [lib/types.ts](lib/types.ts) (`BaseEntity`, étendu par `Example`, `Vote` et `Secret`) et doivent être maintenus à la main en cas d'évolution du schéma.
+
+### Mise à niveau d'une base existante
+
+La section 3 de `scripts/001_create_tables.sql` met à niveau les tables créées avant la table mère : elle ajoute `is_delete`, `created_at` et `deleted_at` si elles manquent, rend `created_at` non nul, puis rattache chaque table à `base_entity`. Elle est sans effet sur une table déjà à jour, le script reste donc rejouable partout.
 
 ## Formats d'export
 
@@ -261,12 +335,14 @@ Les guillemets dans les textes sont échappés en les doublant. Les tags sont jo
 
 ## Codes d'accès
 
-La page de validation et le téléchargement des exports demandent un code. Ces codes sont des constantes définies **côté client** :
+La page de validation et le téléchargement des exports demandent un code. Les codes de référence sont stockés dans la table `secrets` (un par type, `validate` et `export`), créée et pré-remplie par le schéma.
+
+**État actuel** : les pages comparent encore la saisie à des constantes **côté client**, identiques aux valeurs insérées en base :
 
 - `VALIDATION_CODE` dans [app/review/page.tsx](app/review/page.tsx)
 - `EXPORT_CODE` dans [app/export/page.tsx](app/export/page.tsx)
 
-Ils sont donc visibles par quiconque inspecte le bundle JavaScript, et les server actions ne les vérifient pas. Il s'agit d'un simple garde-fou contre les accès accidentels, pas d'une authentification. Pour les modifier, changez la valeur des constantes.
+Ces constantes sont visibles par quiconque inspecte le bundle JavaScript, et les server actions ne vérifient pas le code. Il s'agit d'un simple garde-fou contre les accès accidentels, pas d'une authentification. La table `secrets` prépare la vérification côté serveur ; tant que les pages ne l'utilisent pas, un changement de code doit être fait **à la fois** en base et dans les constantes.
 
 ## Thème et design
 
@@ -278,7 +354,8 @@ Ils sont donc visibles par quiconque inspecte le bundle JavaScript, et les serve
 
 ## Limites connues
 
-- **Aucune authentification.** Tout visiteur peut soumettre et voter ; les codes d'accès sont côté client uniquement et les server actions sont appelables par n'importe quel client HTTP.
+- **Codes d'accès côté client.** Une fois connecté avec Google, tout utilisateur peut appeler les server actions ; les codes de validation et d'export ne sont vérifiés que dans le navigateur.
+- **Tout compte Google accepté.** Aucune restriction de domaine ou liste d'utilisateurs n'est appliquée par défaut.
 - **Anonymat du votant.** L'identifiant est stocké en `localStorage` ; vider le stockage ou changer de navigateur permet de revoter.
 - **Seuil de validation très bas.** Un seul vote suffit à valider ou rejeter.
 - **Erreurs TypeScript ignorées au build** (`typescript.ignoreBuildErrors: true` dans `next.config.mjs`). Utilisez `yarn typecheck`.
@@ -308,7 +385,7 @@ Pour un hôte distant, la connexion est chiffrée par défaut (`DATABASE_SSL=req
 
 ### Schéma et données existantes
 
-Les tables créées à l'époque Supabase ont les mêmes colonnes : rien à migrer, les données restent en place. `scripts/001_create_tables.sql` n'utilise que `CREATE … IF NOT EXISTS`, vous pouvez donc le rejouer sans risque dans l'éditeur SQL de Supabase ou depuis votre poste :
+Les tables créées à l'époque Supabase sont mises à niveau par le script lui-même (ajout de `is_delete` et `deleted_at`, rattachement à `base_entity`), les données restent en place. Le script est idempotent : rejouez-le dans l'éditeur SQL de Supabase ou depuis votre poste :
 
 ```powershell
 $env:DATABASE_URL = "postgresql://postgres.<ref>:<mot-de-passe>@aws-0-<region>.pooler.supabase.com:6543/postgres"
@@ -320,5 +397,6 @@ Les policies RLS existantes peuvent rester : le rôle `postgres`, propriétaire 
 ### Étapes
 
 1. Récupérer la chaîne « Transaction pooler » du projet Supabase et vérifier le schéma (étape ci-dessus).
-2. Déclarer `DATABASE_URL` dans les variables d'environnement de l'hébergeur.
-3. Déployer la branche `main`. La branche de travail est `develop`.
+2. Déclarer `DATABASE_URL` et les cinq variables Auth0 dans les variables d'environnement de l'hébergeur, avec `APP_BASE_URL` égal à l'URL publique.
+3. Ajouter cette URL publique aux *Allowed Callback URLs* (`/auth/callback`) et *Allowed Logout URLs* de l'application Auth0, et remplacer les clés Google de développement par les vôtres.
+4. Déployer la branche `main`. La branche de travail est `develop`.

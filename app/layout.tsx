@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
 import { Header } from "@/components/header"
+import { getSessionUser } from "@/lib/auth0"
 
 const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
@@ -31,15 +32,19 @@ export const metadata: Metadata = {
   },
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  // Lecture du cookie de session : rend toutes les pages dynamiques, ce qui est
+  // attendu puisque le site entier est derrière la connexion.
+  const user = await getSessionUser()
+
   return (
     <html lang="fr">
       <body className={`font-sans antialiased`}>
-        <Header />
+        <Header user={user} />
         {children}
         <Analytics />
       </body>

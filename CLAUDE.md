@@ -33,6 +33,7 @@ Toutes côté serveur, sans préfixe `NEXT_PUBLIC_` (voir `.env.example`) :
 - `DATABASE_URL` : chaîne de connexion PostgreSQL. En local `postgresql://postgres:…@localhost:5432/gec_collector`. Ne pas y mettre `sslmode=` : pg le ferait primer sur `DATABASE_SSL`.
 - `POSTGRES_URL` : repli si `DATABASE_URL` est absente (variable posée par l'intégration Supabase ↔ Vercel).
 - `DATABASE_SSL` : `disable` (défaut si hôte local), `require` (défaut sinon, certificat non vérifié, nécessaire pour Supabase), `verify-full` (+ `DATABASE_SSL_CA` en PEM).
+- `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `AUTH0_SECRET` (`openssl rand -hex 32`), `APP_BASE_URL` (sans slash final) : lues par `@auth0/nextjs-auth0`. Sans elles, **toutes les requêtes échouent** puisque `proxy.ts` instancie le client Auth0.
 
 **Production = Supabase**, atteint par sa chaîne « Transaction pooler » (port 6543). La clé anon, l'API REST et le RLS de Supabase ne sont plus utilisés : le rôle `postgres` est propriétaire des tables et n'est pas soumis aux policies. Les tables créées à l'époque Supabase ont les mêmes colonnes que `scripts/001_create_tables.sql`.
 
@@ -40,7 +41,9 @@ Next.js charge `.env.local` nativement ; `next.config.mjs` importe aussi `dotenv
 
 ### Base de données
 
-- Schéma : `scripts/001_create_tables.sql` (tables `examples`, `votes`, index). Idempotent.
+- Schéma : `scripts/001_create_tables.sql`. Table mère `base_entity` (`is_delete`, `created_at`, `deleted_at`) dont `examples`, `votes` et `secrets` héritent via `INHERITS`. Idempotent : sa section 3 met à niveau les tables créées avant l'héritage (ajout des colonnes + `ALTER TABLE … INHERIT`), ce qui couvre la base Supabase de prod. Il insère aussi les deux codes d'accès initiaux dans `secrets` avec `ON CONFLICT DO NOTHING`.
+- **Suppression logique uniquement** : jamais de `DELETE`. Supprimer = `UPDATE … SET is_delete = true, deleted_at = NOW()`. Toute requête de lecture, de comptage ou de mise à jour filtre sur `is_delete = false`. `softDeleteExample()` dans `lib/examples.ts` marque un exemple et ses votes en transaction ; elle n'est exposée par aucune action (pas d'authentification).
+- Héritage PostgreSQL : clés primaires, `UNIQUE` et clés étrangères ne sont pas héritées, chaque table déclare les siennes. Une nouvelle table métier doit être créée avec `INHERITS (base_entity)` **et** ajoutée à la liste de la section 3 du script.
 - Démo : `scripts/002_seed.sql`, n'insère que si `examples` est vide.
 - `scripts/db-setup.mjs` se connecte à la base d'administration `postgres` du même serveur pour créer la base cible, puis applique les SQL. Pas d'outil de migration : une évolution de schéma se fait en modifiant le SQL (de façon idempotente) et `lib/types.ts` à la main.
 
@@ -57,6 +60,16 @@ page "use client"  →  app/actions.ts ("use server")  →  lib/examples.ts  →
 - `app/actions.ts` valide ses entrées avec zod et **renvoie des objets de résultat** (`{ ok, error }`, `{ outcome: "recorded" | "duplicate" | "not_found" | "error" }`) au lieu de lever des exceptions, car Next.js masque les messages d'erreur des server actions en production. Garder ce pattern pour toute nouvelle action.
 - `pg` est listé dans `serverExternalPackages` de `next.config.mjs`.
 
+### Authentification (Auth0, connexion Google)
+
+- `proxy.ts` (le `middleware.ts` de Next 16) appelle `auth0.middleware()` qui monte `/auth/login`, `/auth/callback`, `/auth/logout`, `/auth/profile`, puis **redirige toute requête sans session** vers `/auth/login?returnTo=…`. Tout le site est derrière le login ; seuls `/auth/*` et les fichiers statiques du matcher passent.
+- `lib/auth0.ts` : instance `Auth0Client` partagée, forcée sur la connexion `google-oauth2`, et `getSessionUser()` qui renvoie un `SessionUser` (type dans `lib/types.ts`, importable côté client).
+- `app/layout.tsx` est `async` et lit la session pour l'en-tête : toutes les pages sont donc dynamiques.
+- Chaque server action revérifie `auth0.getSession()` (seconde barrière derrière le proxy) et renvoie `Connexion requise.` sinon.
+- Le lien de déconnexion dans `components/header.tsx` est un `<a href="/auth/logout">` : **jamais un `<Link>`**, dont le préchargement déconnecterait l'utilisateur.
+- Les codes d'accès de `/review` et `/export` restent un verrou distinct, appliqué après la connexion. Le vote utilise toujours le `voter_hash` du navigateur, pas l'identité Auth0.
+- Tout compte Google est accepté ; une restriction (domaine, liste) se ferait par une Action Auth0 post-login ou une table `users`.
+
 ### Flux de validation
 
 1. `/submit` appelle `submitExample` → `INSERT` avec `status = 'pending'`, puis redirige vers `/thanks`.
@@ -67,11 +80,13 @@ page "use client"  →  app/actions.ts ("use server")  →  lib/examples.ts  →
 
 ### Codes d'accès
 
-`/review` et le téléchargement sur `/export` sont protégés par un code saisi dans un champ. Ces codes sont des **constantes en clair dans le code client** (`VALIDATION_CODE` dans `app/review/page.tsx`, `EXPORT_CODE` dans `app/export/page.tsx`) et les server actions ne les vérifient pas. C'est un garde-fou, pas une authentification. Ne pas les présenter comme sécurisés.
+`/review` et le téléchargement sur `/export` sont protégés par un code saisi dans un champ. Les codes de référence vivent dans la table `secrets` (`type` = `validate` | `export`, `code` en clair ; types `SecretType` / `Secret` dans `lib/types.ts`).
+
+**État actuel** : les pages comparent encore à des **constantes en clair côté client** (`VALIDATION_CODE` dans `app/review/page.tsx`, `EXPORT_CODE` dans `app/export/page.tsx`), de même valeur que la table, et les server actions ne vérifient rien. C'est un garde-fou, pas une authentification. Ne pas les présenter comme sécurisés. Si un code change, le changer en base **et** dans la constante tant que la vérification serveur n'est pas branchée.
 
 ### Types
 
-`lib/types.ts` déclare `Example`, `Vote`, `Stats`, `ExampleStatus`, `ExampleFilter` : miroirs manuels du schéma SQL. `lib/examples.ts` convertit les lignes pg via `toExample()` (les `timestamptz` arrivent en `Date`, les `count()`/`sum()` en chaînes bigint).
+`lib/types.ts` déclare `BaseEntity` (colonnes de la table mère), étendu par `Example`, `Vote` et `Secret`, plus `Stats`, `ExampleStatus`, `ExampleFilter`, `SecretType` : miroirs manuels du schéma SQL. `lib/examples.ts` convertit les lignes pg via `toExample()` (les `timestamptz` arrivent en `Date`, les `count()`/`sum()` en chaînes bigint).
 
 ### UI et styles
 

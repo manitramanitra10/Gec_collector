@@ -70,7 +70,7 @@ try {
   const db = new pg.Client({ connectionString: url, ssl })
   await db.connect()
   await db.query(readFileSync(join(here, "001_create_tables.sql"), "utf8"))
-  console.log("Schéma appliqué (tables examples, votes et index).")
+  console.log("Schéma appliqué (tables examples, votes, secrets et index).")
   if (withSeed) {
     await db.query(readFileSync(join(here, "002_seed.sql"), "utf8"))
     const { rows } = await db.query("SELECT count(*)::int AS n FROM examples")
