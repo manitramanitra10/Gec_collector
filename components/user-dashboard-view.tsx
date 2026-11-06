@@ -65,6 +65,19 @@ function describe(activity: DashboardActivity): { label: string; icon: React.Rea
       return details.ok
         ? { label: "Accès à la supervision ouvert", icon: <KeyRound className="h-4 w-4 text-primary" /> }
         : { label: "Code de supervision refusé", icon: <KeyRound className="h-4 w-4 text-destructive" /> }
+    case "validate.unlock":
+      return details.ok
+        ? { label: "Accès à la validation ouvert", icon: <KeyRound className="h-4 w-4 text-primary" /> }
+        : { label: "Code de validation refusé", icon: <KeyRound className="h-4 w-4 text-destructive" /> }
+    case "export.unlock":
+      return details.ok
+        ? { label: "Accès à l'export ouvert", icon: <KeyRound className="h-4 w-4 text-primary" /> }
+        : { label: "Code d'export refusé", icon: <KeyRound className="h-4 w-4 text-destructive" /> }
+    case "export.download":
+      return {
+        label: `Corpus téléchargé (${String(details.format ?? "json").toUpperCase()}, ${String(details.filter ?? "")})`,
+        icon: <Download className="h-4 w-4 text-primary" />,
+      }
     case "activity.export":
       return details.self
         ? { label: "Activité téléchargée", icon: <Download className="h-4 w-4 text-muted-foreground" /> }

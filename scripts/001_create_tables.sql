@@ -226,6 +226,30 @@ CREATE INDEX IF NOT EXISTS idx_examples_batch_id   ON examples(batch_id);
 -- Import rejouable : un exemple par lot et identifiant de fichier.
 CREATE UNIQUE INDEX IF NOT EXISTS uq_examples_batch_external
   ON examples(batch_id, external_id) WHERE batch_id IS NOT NULL AND external_id IS NOT NULL;
+
+-- Index taillés pour les requêtes des pages (tous partiels sur les lignes actives).
+-- Compteurs et sommes par statut (Exporter, tableaux de bord) : scan d'index seul.
+CREATE INDEX IF NOT EXISTS idx_examples_status_counts
+  ON examples(status) INCLUDE (votes_up, votes_down) WHERE is_delete = false;
+-- Listes par statut du plus récent au plus ancien, pagination par clé (Valider, export).
+CREATE INDEX IF NOT EXISTS idx_examples_status_created
+  ON examples(status, created_at DESC, id DESC) WHERE is_delete = false;
+-- File de correction : prochain exemple dans l'ordre d'import, tous lots ou par lot.
+CREATE INDEX IF NOT EXISTS idx_examples_queue
+  ON examples(created_at, external_id) WHERE status = 'to_correct' AND is_delete = false;
+CREATE INDEX IF NOT EXISTS idx_examples_queue_batch
+  ON examples(batch_id, created_at, external_id) WHERE status = 'to_correct' AND is_delete = false;
+-- Compteurs par lot (Corriger, supervision).
+CREATE INDEX IF NOT EXISTS idx_examples_batch_status
+  ON examples(batch_id, status) WHERE is_delete = false;
+-- Contributions corrigées par un utilisateur (tableaux de bord, supervision).
+CREATE INDEX IF NOT EXISTS idx_examples_corrected_by
+  ON examples(corrected_by) WHERE corrected_by IS NOT NULL;
+
+-- Statistiques du planificateur : indispensables après un import massif, sinon
+-- PostgreSQL ignore les index et parcourt toute la table.
+ANALYZE examples;
+ANALYZE votes;
 CREATE INDEX IF NOT EXISTS idx_votes_example_id    ON votes(example_id);
 CREATE INDEX IF NOT EXISTS idx_users_email         ON users(email);
 CREATE INDEX IF NOT EXISTS idx_activity_log_user   ON activity_log(created_by, created_at DESC);

@@ -13,13 +13,13 @@ export const LOCK_MINUTES = 10
 
 // Toutes les requêtes filtrent sur is_delete = false : une ligne supprimée
 // logiquement n'est jamais lue, comptée ni modifiée.
-const EXAMPLE_SELECT = `
-  SELECT e.id, e.incorrect_text, e.correct_text, e.tags, e.source, e.status, e.votes_up, e.votes_down,
-         e.origin, e.batch_id, b.name AS batch_name, e.external_id, e.error_types,
-         e.corrected_by, e.corrected_at, e.locked_by, e.locked_at,
-         e.is_delete, e.created_at, e.deleted_at, e.created_by, e.deleted_by
-  FROM examples e
-  LEFT JOIN batches b ON b.id = e.batch_id`
+const EXAMPLE_COLUMNS = `
+  e.id, e.incorrect_text, e.correct_text, e.tags, e.source, e.status, e.votes_up, e.votes_down,
+  e.origin, e.batch_id, b.name AS batch_name, e.external_id, e.error_types,
+  e.corrected_by, e.corrected_at, e.locked_by, e.locked_at,
+  e.is_delete, e.created_at, e.deleted_at, e.created_by, e.deleted_by`
+const EXAMPLE_FROM = `FROM examples e LEFT JOIN batches b ON b.id = e.batch_id`
+const EXAMPLE_SELECT = `SELECT ${EXAMPLE_COLUMNS} ${EXAMPLE_FROM}`
 
 function toIso(value: unknown): string {
   return value instanceof Date ? value.toISOString() : String(value)
@@ -103,16 +103,26 @@ export async function listErrorTypes(): Promise<ErrorType[]> {
 
 /** Lots actifs, du plus récent au plus ancien, avec le nombre d'exemples actifs par statut. */
 export async function listBatches(): Promise<Batch[]> {
+  // Les compteurs sont agrégés d'abord (index (batch_id, status)), puis joints aux lots :
+  // une jointure directe lots → exemples forçait un parcours complet des exemples.
   const { rows } = await getPool().query(`
     SELECT b.id, b.name, b.origin, b.note, b.is_delete, b.created_at, b.deleted_at, b.created_by, b.deleted_by,
-           count(e.id) FILTER (WHERE e.status = 'to_correct') AS to_correct,
-           count(e.id) FILTER (WHERE e.status = 'pending')    AS pending,
-           count(e.id) FILTER (WHERE e.status = 'validated')  AS validated,
-           count(e.id) FILTER (WHERE e.status = 'rejected')   AS rejected
+           coalesce(s.to_correct, 0) AS to_correct,
+           coalesce(s.pending, 0)    AS pending,
+           coalesce(s.validated, 0)  AS validated,
+           coalesce(s.rejected, 0)   AS rejected
     FROM batches b
-    LEFT JOIN examples e ON e.batch_id = b.id AND e.is_delete = false
+    LEFT JOIN (
+      SELECT batch_id,
+             count(*) FILTER (WHERE status = 'to_correct') AS to_correct,
+             count(*) FILTER (WHERE status = 'pending')    AS pending,
+             count(*) FILTER (WHERE status = 'validated')  AS validated,
+             count(*) FILTER (WHERE status = 'rejected')   AS rejected
+      FROM examples
+      WHERE is_delete = false AND batch_id IS NOT NULL
+      GROUP BY batch_id
+    ) s ON s.batch_id = b.id
     WHERE b.is_delete = false
-    GROUP BY b.id
     ORDER BY b.created_at DESC`)
   return rows.map((r) => ({
     id: r.id,
@@ -214,40 +224,78 @@ export async function listPendingExamples(page = 1, pageSize = 10): Promise<Page
   return { items: rows.map(toExample), total, page: current, pageSize, pageCount }
 }
 
-export async function listExamples(filter: ExampleFilter): Promise<Example[]> {
-  const { rows } = await getPool().query(
-    `${EXAMPLE_SELECT}
-     WHERE e.is_delete = false ${filter === "all" ? "" : "AND e.status = $1"}
-     ORDER BY e.created_at DESC`,
-    filter === "all" ? [] : [filter],
-  )
-  return rows.map(toExample)
+/**
+ * Parcourt les exemples d'un filtre par tranches, du plus récent au plus ancien,
+ * en mémoire constante (pagination par clé sur (created_at, id)). Sert à l'export
+ * en flux : ne jamais charger la liste complète, elle dépasse 170 000 lignes.
+ * Le curseur repasse par `created_at::text` pour garder la précision microseconde.
+ */
+export async function* iterateExamples(filter: ExampleFilter, chunkSize = 2000): AsyncGenerator<Example[]> {
+  const pool = getPool()
+  let cursor: { createdAt: string; id: string } | null = null
+  for (;;) {
+    const conditions = ["e.is_delete = false"]
+    const params: unknown[] = []
+    if (filter !== "all") {
+      params.push(filter)
+      conditions.push(`e.status = $${params.length}`)
+    }
+    if (cursor) {
+      params.push(cursor.createdAt, cursor.id)
+      conditions.push(`(e.created_at, e.id) < ($${params.length - 1}::timestamptz, $${params.length}::uuid)`)
+    }
+    params.push(chunkSize)
+    const { rows } = await pool.query(
+      `SELECT ${EXAMPLE_COLUMNS}, e.created_at::text AS created_at_text
+       ${EXAMPLE_FROM}
+       WHERE ${conditions.join(" AND ")}
+       ORDER BY e.created_at DESC, e.id DESC
+       LIMIT $${params.length}`,
+      params,
+    )
+    if (rows.length === 0) return
+    yield rows.map(toExample)
+    if (rows.length < chunkSize) return
+    const last = rows[rows.length - 1]
+    cursor = { createdAt: last.created_at_text, id: last.id }
+  }
 }
 
 export async function getStats(): Promise<Stats> {
-  const { rows } = await getPool().query(`
-    SELECT
-      (SELECT count(*) FROM examples WHERE is_delete = false)                           AS total,
-      (SELECT count(*) FROM examples WHERE is_delete = false AND status = 'to_correct') AS to_correct,
-      (SELECT count(*) FROM examples WHERE is_delete = false AND status = 'validated')  AS validated,
-      (SELECT count(*) FROM examples WHERE is_delete = false AND status = 'pending')    AS pending,
-      (SELECT count(*) FROM examples WHERE is_delete = false AND status = 'rejected')   AS rejected,
-      (SELECT count(*) FROM votes WHERE is_delete = false)                              AS total_votes,
-      (SELECT coalesce(sum(votes_up), 0) FROM examples WHERE is_delete = false)         AS total_votes_up,
-      (SELECT coalesce(sum(votes_down), 0) FROM examples WHERE is_delete = false)       AS total_votes_down
-  `)
-  const r = rows[0]
+  // Une seule passe sur l'index (status, votes_up, votes_down) au lieu de huit parcours de table.
+  const pool = getPool()
+  const [byStatus, votes] = await Promise.all([
+    pool.query(
+      `SELECT status, count(*) AS n, coalesce(sum(votes_up), 0) AS up, coalesce(sum(votes_down), 0) AS down
+       FROM examples WHERE is_delete = false GROUP BY status`,
+    ),
+    pool.query(`SELECT count(*) AS n FROM votes WHERE is_delete = false`),
+  ])
   // count() et sum() renvoient des bigint, que pg sérialise en chaînes.
-  return {
-    total: Number(r.total),
-    toCorrect: Number(r.to_correct),
-    validated: Number(r.validated),
-    pending: Number(r.pending),
-    rejected: Number(r.rejected),
-    totalVotes: Number(r.total_votes),
-    totalVotesUp: Number(r.total_votes_up),
-    totalVotesDown: Number(r.total_votes_down),
+  const stats: Stats = {
+    total: 0,
+    toCorrect: 0,
+    validated: 0,
+    pending: 0,
+    rejected: 0,
+    totalVotes: Number(votes.rows[0].n),
+    totalVotesUp: 0,
+    totalVotesDown: 0,
   }
+  const key: Record<string, "toCorrect" | "validated" | "pending" | "rejected"> = {
+    to_correct: "toCorrect",
+    validated: "validated",
+    pending: "pending",
+    rejected: "rejected",
+  }
+  for (const r of byStatus.rows) {
+    const n = Number(r.n)
+    stats.total += n
+    if (key[r.status]) stats[key[r.status]] = n
+    stats.totalVotesUp += Number(r.up)
+    stats.totalVotesDown += Number(r.down)
+  }
+  return stats
 }
 
 // ---------------------------------------------------------------------------

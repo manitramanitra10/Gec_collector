@@ -9,7 +9,6 @@ import {
   getStats,
   listBatches,
   listErrorTypes,
-  listExamples,
   listPendingExamples,
   rejectCorrection,
   skipCorrection,
@@ -19,7 +18,7 @@ import { logActivity } from "@/lib/activity"
 import { getUserActivityExport } from "@/lib/dashboard"
 import { grantAccess, hasAccess, revokeAccess, verifyCode } from "@/lib/secrets"
 import { findUserById, updateUserNames, upsertUserFromAuth0 } from "@/lib/users"
-import type { Batch, ErrorType, Example, ExampleFilter, Stats, User, UserActivityExport } from "@/lib/types"
+import type { Batch, ErrorType, Example, SecretType, Stats, User, UserActivityExport } from "@/lib/types"
 
 // Server actions : seules portes d'entrée des pages client vers la base de données.
 // Elles renvoient des objets de résultat plutôt que de lever des erreurs, car
@@ -30,6 +29,7 @@ import type { Batch, ErrorType, Example, ExampleFilter, Stats, User, UserActivit
 
 const LOGIN_REQUIRED = "Connexion requise."
 const ACCOUNT_DISABLED = "Ce compte est désactivé."
+const VALIDATION_CODE_REQUIRED = "Code de validation requis."
 
 type UserCheck = { user: User } | { user: null; error: string }
 
@@ -118,10 +118,11 @@ const pageSchema = z.object({ page: z.number().int().min(1).default(1) })
 
 export type PendingPage = Awaited<ReturnType<typeof listPendingExamples>>
 
-/** File de validation paginée (10 par page). */
+/** File de validation paginée (10 par page). Exige le code de validation (cookie serveur). */
 export async function fetchPendingExamples(input: z.input<typeof pageSchema> = {}): Promise<PendingPage> {
   const check = await requireUser()
   if (!check.user) throw new Error(check.error)
+  if (!(await hasAccess("validate"))) throw new Error(VALIDATION_CODE_REQUIRED)
   const { page } = pageSchema.parse(input)
   return listPendingExamples(page, 10)
 }
@@ -140,6 +141,7 @@ export type VoteActionResult =
 export async function voteOnExample(input: z.input<typeof voteSchema>): Promise<VoteActionResult> {
   const check = await requireUser()
   if (!check.user) return { outcome: "error", error: check.error }
+  if (!(await hasAccess("validate"))) return { outcome: "error", error: VALIDATION_CODE_REQUIRED }
 
   const parsed = voteSchema.safeParse(input)
   if (!parsed.success) {
@@ -249,28 +251,30 @@ export async function rejectExample(input: z.input<typeof exampleIdSchema>): Pro
 }
 
 // ---------------------------------------------------------------------------
-// Export
+// Export : statistiques seules ; le téléchargement passe par /api/export (flux).
 // ---------------------------------------------------------------------------
 
-const filterSchema = z.enum(["all", "to_correct", "pending", "validated", "rejected"])
-
-export async function fetchExportData(filter: ExampleFilter): Promise<{ examples: Example[]; stats: Stats }> {
+export async function fetchExportStats(): Promise<Stats> {
   const check = await requireUser()
   if (!check.user) throw new Error(check.error)
-  const parsedFilter = filterSchema.parse(filter)
-  const [examples, stats] = await Promise.all([listExamples(parsedFilter), getStats()])
-  return { examples, stats }
+  return getStats()
 }
 
 // ---------------------------------------------------------------------------
-// Route de suivi (code vérifié côté serveur contre la table secrets)
+// Codes d'accès vérifiés côté serveur contre la table secrets
 // ---------------------------------------------------------------------------
 
 const unlockSchema = z.object({ code: z.string().min(1).max(200) })
 
 export type UnlockResult = { ok: true } | { ok: false; error: string }
 
-export async function unlockSupervision(input: z.input<typeof unlockSchema>): Promise<UnlockResult> {
+const UNLOCK_ACTIONS = {
+  validate: "validate.unlock",
+  export: "export.unlock",
+  supervision: "supervision.unlock",
+} as const
+
+async function unlockWithCode(type: SecretType, input: z.input<typeof unlockSchema>): Promise<UnlockResult> {
   const check = await requireUser()
   if (!check.user) return { ok: false, error: check.error }
 
@@ -278,21 +282,33 @@ export async function unlockSupervision(input: z.input<typeof unlockSchema>): Pr
   if (!parsed.success) return { ok: false, error: "Saisissez le code." }
 
   try {
-    const ok = await verifyCode("supervision", parsed.data.code)
+    const ok = await verifyCode(type, parsed.data.code)
     // Tentatives réussies et refusées sont journalisées ; le code lui-même ne l'est jamais.
     await logActivity({
       actorId: check.user.id,
-      action: "supervision.unlock",
+      action: UNLOCK_ACTIONS[type],
       entityType: "secret",
       details: { ok },
     })
     if (!ok) return { ok: false, error: "Code incorrect." }
-    await grantAccess("supervision", parsed.data.code)
+    await grantAccess(type, parsed.data.code)
     return { ok: true }
   } catch (err) {
-    console.error("unlockSupervision :", err)
+    console.error(`unlock ${type} :`, err)
     return { ok: false, error: "Impossible de vérifier le code." }
   }
+}
+
+export async function unlockValidation(input: z.input<typeof unlockSchema>): Promise<UnlockResult> {
+  return unlockWithCode("validate", input)
+}
+
+export async function unlockExport(input: z.input<typeof unlockSchema>): Promise<UnlockResult> {
+  return unlockWithCode("export", input)
+}
+
+export async function unlockSupervision(input: z.input<typeof unlockSchema>): Promise<UnlockResult> {
+  return unlockWithCode("supervision", input)
 }
 
 export async function lockSupervision(): Promise<{ ok: boolean }> {

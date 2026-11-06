@@ -192,6 +192,8 @@ try {
   )
 
   await client.query("COMMIT")
+  // Sans statistiques à jour, le planificateur ignore les index sur la table agrandie.
+  await client.query("ANALYZE examples")
   console.log(`Lot "${batchName}" (${origin}) ${batch.inserted ? "créé" : "réutilisé"}, import tracé pour ${actor.email}.`)
   console.log(`Exemples : ${inserted} importé(s), ${skipped} déjà présent(s), ${invalid} invalide(s) sur ${items.length}.`)
   if (newCodes.length) console.log(`Types d'erreur ajoutés au référentiel : ${newCodes.join(", ")} (libellés à ajuster en base).`)

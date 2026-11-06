@@ -22,6 +22,7 @@ Les contributeurs soumettent des exemples de façon anonyme, des relecteurs les 
 - [Codes d'accès](#codes-daccès)
 - [Thème et design](#thème-et-design)
 - [Limites connues](#limites-connues)
+- [Performance](#performance)
 - [Déploiement et production sur Supabase](#déploiement-et-production-sur-supabase)
 
 ## Fonctionnalités
@@ -209,7 +210,7 @@ lib/db.ts             pool pg, chaîne de connexion DATABASE_URL
 PostgreSQL
 ```
 
-- Les pages n'accèdent jamais à la base directement. Elles appellent les fonctions exportées par [app/actions.ts](app/actions.ts).
+- Les pages n'accèdent jamais à la base directement. Elles appellent les fonctions exportées par [app/actions.ts](app/actions.ts). Seule exception, le téléchargement du corpus passe par la route [app/api/export/route.ts](app/api/export/route.ts), car une server action ne peut pas envoyer un fichier en flux.
 - `lib/db.ts` et `lib/examples.ts` importent `server-only` : les importer depuis un composant client fait échouer le build.
 - Les server actions renvoient des objets plutôt que de lever des exceptions, car Next.js masque les messages d'erreur côté client en production.
 - `pg` est déclaré dans `serverExternalPackages` de `next.config.mjs` pour être chargé par Node sans être bundlé.
@@ -276,9 +277,9 @@ Les champs « Phrase incorrecte » et « Phrase corrigée » sont obligatoires (
 
 ### Export
 
-- Les statistiques (total, par statut, nombre de votes) sont calculées en une seule requête SQL.
-- Le filtre de statut (tous, validés, en attente, rejetés) s'applique à la liste exportée.
-- Les fichiers sont générés dans le navigateur et nommés `gec-corpus-<filtre>-<AAAA-MM-JJ>.json` ou `.csv`.
+- Les statistiques (total, par statut, nombre de votes) sont calculées côté serveur en une passe sur un index.
+- Le filtre de statut (validés par défaut, en attente, à corriger, rejetés, tous) s'applique au fichier exporté.
+- Le téléchargement est servi par la route [app/api/export/route.ts](app/api/export/route.ts), qui exige le code d'export puis **envoie le fichier en flux**, par tranches de 2 000 lignes lues avec une pagination par clé : rien n'est chargé en mémoire ni dans le navigateur, quel que soit le volume. Fichiers nommés `gec-corpus-<filtre>-<AAAA-MM-JJ>.json` ou `.csv`. Sur Vercel, la route dispose de 60 secondes, ce qui couvre largement le corpus actuel.
 
 ## Import et correction
 
@@ -492,21 +493,17 @@ Trois codes vivent dans la table `secrets`, un par type, créés et pré-remplis
 UPDATE secrets SET code = 'nouveau_code', updated_at = NOW() WHERE type = 'supervision';
 ```
 
-| Type | Protège | Vérification |
-|---|---|---|
-| `supervision` | La route de suivi `/supervision` | **Côté serveur**, voir ci-dessous |
-| `validate` | La page Valider | Côté client, constante `VALIDATION_CODE` dans [app/review/page.tsx](app/review/page.tsx) |
-| `export` | Le téléchargement sur Exporter | Côté client, constante `EXPORT_CODE` dans [app/export/page.tsx](app/export/page.tsx) |
+| Type | Protège |
+|---|---|
+| `validate` | La page Valider et les actions de vote |
+| `export` | Le téléchargement du corpus (`/api/export`) |
+| `supervision` | La route de suivi `/supervision` |
 
-Pour `validate` et `export`, les pages comparent encore la saisie à des constantes dans le code client, identiques aux valeurs en base : elles sont visibles par quiconque inspecte le bundle, et les server actions ne les vérifient pas. C'est un garde-fou contre les accès accidentels, pas une authentification. Un changement de ces deux codes doit être fait **à la fois** en base et dans les constantes, tant qu'elles ne passent pas par le mécanisme serveur.
+Les trois codes sont vérifiés **côté serveur** par le même mécanisme ([lib/secrets.ts](lib/secrets.ts)) : la saisie est comparée au code en base, réussite ou échec sont journalisés sans le code, puis un cookie httpOnly de douze heures porte une empreinte signée du code, recomparée au code actuel à chaque requête. Changer un code en base révoque donc les accès en cours. Aucun code n'apparaît plus dans le code envoyé au navigateur, et les server actions de validation refusent toute requête sans cookie valide.
 
 ### Route de suivi `/supervision`
 
-Route sans lien dans la navigation, réservée à la supervision. Elle demande le code `supervision`, vérifié **côté serveur** ([lib/secrets.ts](lib/secrets.ts)) :
-
-- la saisie est comparée au code en base ; réussite ou échec sont journalisés (`supervision.unlock`, sans le code) ;
-- après une saisie correcte, un cookie httpOnly de douze heures porte un jeton HMAC du code signé avec `AUTH0_SECRET`, jamais le code lui-même ;
-- à chaque affichage, le jeton est recomparé au code **actuellement** en base : changer le code en base révoque tous les accès en cours. Le bouton Verrouiller supprime le cookie.
+Route sans lien dans la navigation, réservée à la supervision. Elle demande le code `supervision` selon le mécanisme ci-dessus ; le bouton Verrouiller supprime le cookie.
 
 Contenu : totaux du corpus, progression de chaque lot (validés, en attente, rejetés, à corriger), et un tableau par utilisateur (soumis, corrigés, passés, rejetés, votes, contributions validées / en attente / rejetées, dernière activité). Le lien Détail ouvre `/supervision/<users.id>` : le même tableau de bord que celui de l'utilisateur, avec son journal paginé et le bouton Télécharger l'activité, qui livre le JSON complet de cet utilisateur. Chaque téléchargement est journalisé (`activity.export`, avec l'utilisateur visé).
 
@@ -520,7 +517,7 @@ Contenu : totaux du corpus, progression de chaque lot (validés, en attente, rej
 
 ## Limites connues
 
-- **Codes d'accès côté client.** Une fois connecté avec Google, tout utilisateur peut appeler les server actions ; les codes de validation et d'export ne sont vérifiés que dans le navigateur.
+- **Codes partagés.** Un même code de validation ou d'export est partagé par tous les relecteurs ; il n'y a pas encore de rôles par utilisateur.
 - **Tout compte Google accepté.** Aucune restriction de domaine ou liste d'utilisateurs n'est appliquée par défaut.
 - **Pas de rôles.** Tous les comptes ont les mêmes droits ; la suppression logique n'est exposée nulle part faute de rôle administrateur.
 - **Seuil de validation très bas.** Un seul vote suffit à valider ou rejeter.
@@ -528,6 +525,16 @@ Contenu : totaux du corpus, progression de chaque lot (validés, en attente, rej
 - **Lint non configuré.** Le script `lint` échoue faute de configuration ESLint.
 - **Fichiers dupliqués ou obsolètes** : `hooks/use-toast.ts` et `components/ui/use-toast.ts` sont identiques, de même que `hooks/use-mobile.ts` et `components/ui/use-mobile.tsx` ; `styles/globals.css` est une copie non importée de l'ancien thème.
 - **Script `start:dev`** utilise une syntaxe POSIX (`NODE_ENV=development`) qui ne fonctionne pas sous PowerShell ou cmd.
+
+## Performance
+
+Le corpus dépasse 170 000 lignes ; les règles suivantes le gardent fluide.
+
+- **Index partiels adaptés aux requêtes** (section 6 de `scripts/001_create_tables.sql`) : compteurs par statut avec index couvrant, listes par statut du plus récent au plus ancien, file de correction dans l'ordre d'import (tous lots ou par lot), compteurs par lot, contributions par correcteur. Sans eux, la réservation d'un exemple à corriger coûtait plus d'une seconde et les statistiques huit.
+- **`ANALYZE` après tout import massif** : le script d'import le fait lui-même et le schéma le refait. Sans statistiques à jour, PostgreSQL ignore les index et parcourt la table entière.
+- **Jamais de liste complète** : les pages lisent des pages de 10, l'export lit par tranches de 2 000 en flux.
+- **Fonctions Vercel à Francfort** (`vercel.json`, région `fra1`), à côté de la base Supabase : chaque requête SQL coûte un aller-retour réseau, et une page en fait plusieurs.
+- **Lots d'insertion** à l'import : 1 000 lignes par ordre SQL, une seule transaction.
 
 ## Déploiement et production sur Supabase
 

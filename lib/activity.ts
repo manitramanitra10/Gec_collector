@@ -19,6 +19,9 @@ export type ActivityAction =
   | "example.reject"
   | "batch.import"
   | "supervision.unlock"
+  | "validate.unlock"
+  | "export.unlock"
+  | "export.download"
   | "activity.export"
 
 export type ActivityEntityType = "user" | "example" | "vote" | "batch" | "secret"
