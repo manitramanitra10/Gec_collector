@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "correct": "Nisy fahamaizana teny amin'ny Rovan'Antsahadinta, ny alin'ny alarobia teo.",
+    "incorrect": "Nis fahamaizana tny amn rovan Antsahadita, ny alin'ny alarobia teo.",
+    "error_types": ["VOYELLES_SUPPRIMEES", "PONCTUATION_MANQUANTE", "TYPO_DIST1", "VOYELLES_SUPPRIMEES", "VOYELLES_SUPPRIMEES", "VOYELLES_SUPPRIMEES"]
+  },
+  {
+    "id": 2,
+    "correct": "Tsy nisy noraisina ny tranon-dRabodozafimanjaka sy ireo fanaka mbola voatahiry tao.",
+    "incorrect": "Tsy nisy noraisina tranon-dRabodozafimanjaka ny sy ireo fanaka mbola voatahiyr tao.",
+    "error_types": ["TYPO_DIST1", "ORDRE_DES_MOTS", "VOYELLES_SUPPRIMEES"]
+  },
+  {
+    "id": 3,
+    "correct": "Avotra kosa ny mozea sy ireo singa hafa mandrafitra ny Rova.",
+    "incorrect": "Avotra koa ny mozea sy ireo sing haf mandrafitra Ny Rova",
+    "error_types": ["TYPO_DIST1", "CASSE", "PONCTUATION_MANQUANTE", "VOYELLES_SUPPRIMEES", "VOYELLES_SUPPRIMEES"]
+  },
+  {
+    "id": 4,
+    "correct": "Ny 1 novambra tokony ho tamin'ny 8 ora sy sasany alina, may ny tranon-dRabodozafimanjaka, vadin'ny mpanjaka Andrianampoinimerina ao anaty rovan' Antsahadinta.",
+    "incorrect": "Ny 1 novambra tokony ho tamin'ny 8 ora sy sasany aln, may ny tarno-dRabodozafimanjaka vadin'ny mpanjk Andrianampoinimerina ao anaty rovan Antsahadinta",
+    "error_types": ["PONCTUATION_MANQUANTE", "TYPO_DIST1", "PONCTUATION_MANQUANTE", "PONCTUATION_MANQUANTE", "VOYELLES_SUPPRIMEES", "VOYELLES_SUPPRIMEES", "VOYELLES_SUPPRIMEES"]
+  }
+]

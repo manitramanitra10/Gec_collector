@@ -1,26 +1,22 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { createClient } from "@/lib/supabase/client"
+import { fetchErrorTypes, fetchPendingExamples, voteOnExample } from "@/app/actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
+import { Pager } from "@/components/pager"
 import { ThumbsUp, ThumbsDown, Loader2, RefreshCw, CheckCircle, Lock, Unlock } from "lucide-react"
 import type { Example } from "@/lib/types"
 
-// Generate a simple hash for anonymous voting
-function getVoterHash(): string {
-  if (typeof window === "undefined") return ""
-  let hash = localStorage.getItem("voter_hash")
-  if (!hash) {
-    hash = crypto.randomUUID()
-    localStorage.setItem("voter_hash", hash)
-  }
-  return hash
-}
-
 const VALIDATION_CODE = "Gec_validate"
+
+const ORIGIN_LABELS: Record<Example["origin"], string> = {
+  manual: "Saisie directe",
+  synthetic: "Synthétique",
+  web: "Web",
+}
 
 export default function ReviewPage() {
   const [examples, setExamples] = useState<Example[]>([])
@@ -29,26 +25,39 @@ export default function ReviewPage() {
   const [votedIds, setVotedIds] = useState<Set<string>>(new Set())
   const [inputCode, setInputCode] = useState("")
   const [isUnlocked, setIsUnlocked] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [errorLabels, setErrorLabels] = useState<Record<string, string>>({})
 
-  const fetchExamples = useCallback(async () => {
+  useEffect(() => {
+    fetchErrorTypes()
+      .then((types) => setErrorLabels(Object.fromEntries(types.map((t) => [t.code, t.label]))))
+      .catch(() => {})
+  }, [])
+
+  const [page, setPage] = useState(1)
+  const [pageCount, setPageCount] = useState(1)
+  const [total, setTotal] = useState(0)
+
+  const fetchExamples = useCallback(async (requestedPage: number) => {
     setIsLoading(true)
-    const supabase = createClient()
-    const { data, error } = await supabase
-      .from("examples")
-      .select("*")
-      .eq("status", "pending")
-      .order("created_at", { ascending: false })
-      .limit(20)
-
-    if (!error && data) {
-      setExamples(data)
+    setLoadError(null)
+    try {
+      const result = await fetchPendingExamples({ page: requestedPage })
+      setExamples(result.items)
+      setTotal(result.total)
+      setPageCount(result.pageCount)
+      // Le serveur ramène la page dans les bornes si la file a rétréci entre-temps.
+      setPage(result.page)
+    } catch {
+      setLoadError("Impossible de charger les exemples. Vérifiez la connexion à la base de données.")
+    } finally {
+      setIsLoading(false)
     }
-    setIsLoading(false)
   }, [])
 
   useEffect(() => {
-    fetchExamples()
-  }, [fetchExamples])
+    fetchExamples(page)
+  }, [fetchExamples, page])
 
   const handleUnlock = () => {
     if (inputCode === VALIDATION_CODE) {
@@ -60,54 +69,38 @@ export default function ReviewPage() {
 
   const handleVote = async (exampleId: string, vote: 1 | -1) => {
     setVotingId(exampleId)
-    const supabase = createClient()
-    const voterHash = getVoterHash()
 
     try {
-      // Insert vote
-      const { error: voteError } = await supabase.from("votes").insert({
-        example_id: exampleId,
-        voter_hash: voterHash,
-        vote,
-      })
+      // Le votant est l'utilisateur connecté, identifié côté serveur.
+      const result = await voteOnExample({ exampleId, vote })
 
-      if (voteError) {
-        if (voteError.code === "23505") {
-          // Duplicate vote
-          alert("Vous avez déjà voté pour cet exemple.")
-        }
+      if (result.outcome === "duplicate") {
+        alert("Vous avez déjà voté pour cet exemple.")
+        return
+      }
+      if (result.outcome === "not_found") {
+        setExamples((prev) => prev.filter((e) => e.id !== exampleId))
+        return
+      }
+      if (result.outcome === "error") {
+        alert(result.error)
         return
       }
 
-      // Update vote count
-      const example = examples.find((e) => e.id === exampleId)
-      if (!example) return
-
-      const newVotesUp = example.votes_up + (vote === 1 ? 1 : 0)
-      const newVotesDown = example.votes_down + (vote === -1 ? 1 : 0)
-
-      let newStatus = example.status
-      if (newVotesUp >= 1) newStatus = "validated"
-      if (newVotesDown >= 1) newStatus = "rejected"
-
-      await supabase
-        .from("examples")
-        .update({
-          votes_up: newVotesUp,
-          votes_down: newVotesDown,
-          status: newStatus,
-        })
-        .eq("id", exampleId)
-
+      // Compteurs et statut sont calculés côté serveur, en transaction.
+      const updated = result.example
       setVotedIds((prev) => new Set(prev).add(exampleId))
 
-      // Refresh if status changed
-      if (newStatus !== "pending") {
-        setExamples((prev) => prev.filter((e) => e.id !== exampleId))
+      if (updated.status !== "pending") {
+        const remainingOnPage = examples.filter((e) => e.id !== exampleId)
+        setExamples(remainingOnPage)
+        setTotal((t) => Math.max(0, t - 1))
+        // Page vidée par les votes : on recharge pour faire remonter la suite de la file.
+        if (remainingOnPage.length === 0 && total > 1) {
+          await fetchExamples(page)
+        }
       } else {
-        setExamples((prev) =>
-          prev.map((e) => (e.id === exampleId ? { ...e, votes_up: newVotesUp, votes_down: newVotesDown } : e)),
-        )
+        setExamples((prev) => prev.map((e) => (e.id === exampleId ? updated : e)))
       }
     } finally {
       setVotingId(null)
@@ -137,6 +130,7 @@ export default function ReviewPage() {
             <CardContent className="space-y-4">
               <Input
                 type="password"
+                suppressHydrationWarning
                 placeholder="Code de validation"
                 value={inputCode}
                 onChange={(e) => setInputCode(e.target.value)}
@@ -156,16 +150,33 @@ export default function ReviewPage() {
   return (
     <div className="min-h-screen bg-background py-12">
       <div className="mx-auto max-w-3xl px-6">
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Validation</h1>
-            <p className="text-muted-foreground">Votez pour valider ou rejeter les exemples soumis.</p>
+            <p className="text-muted-foreground">
+              Votez pour valider ou rejeter les exemples soumis.
+              {total > 0 && (
+                <>
+                  {" "}
+                  {total} en attente, page {page} sur {pageCount}.
+                </>
+              )}
+            </p>
           </div>
-          <Button variant="outline" size="sm" onClick={fetchExamples} className="gap-2 bg-transparent">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchExamples(page)}
+            className="gap-2 self-start bg-transparent"
+          >
             <RefreshCw className="h-4 w-4" />
             Rafraîchir
           </Button>
         </div>
+
+        {loadError && (
+          <div className="mb-6 rounded-xl bg-destructive/10 p-4 text-sm text-destructive">{loadError}</div>
+        )}
 
         {examples.length === 0 ? (
           <Card className="border-border/50 text-center">
@@ -215,8 +226,19 @@ export default function ReviewPage() {
                     </div>
                   </div>
 
-                  {example.tags && example.tags.length > 0 && (
+                  {(example.origin !== "manual" || example.error_types.length > 0 || example.tags.length > 0) && (
                     <div className="flex flex-wrap gap-1">
+                      {example.origin !== "manual" && (
+                        <Badge variant="outline" className="text-xs">
+                          {ORIGIN_LABELS[example.origin]}
+                          {example.batch_name ? ` · ${example.batch_name}` : ""}
+                        </Badge>
+                      )}
+                      {example.error_types.map((code) => (
+                        <Badge key={code} variant="secondary" className="text-xs">
+                          {errorLabels[code] ?? code}
+                        </Badge>
+                      ))}
                       {example.tags.map((tag) => (
                         <Badge key={tag} variant="secondary" className="text-xs">
                           {tag}
@@ -262,6 +284,8 @@ export default function ReviewPage() {
             ))}
           </div>
         )}
+
+        <Pager page={page} pageCount={pageCount} onPageChange={setPage} disabled={isLoading} className="mt-8" />
       </div>
     </div>
   )

@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useEffect, useState, useCallback } from "react"
-import { createClient } from "@/lib/supabase/client"
+import { fetchExportData } from "@/app/actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -11,7 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Download, FileJson, FileSpreadsheet, Loader2, Database, ThumbsUp, ThumbsDown, Users, Lock } from "lucide-react"
-import type { Example } from "@/lib/types"
+import type { Example, ExampleFilter, Stats } from "@/lib/types"
 
 const EXPORT_CODE = "Gec_export"
 
@@ -24,16 +24,17 @@ export default function ExportPage() {
 
   const [examples, setExamples] = useState<Example[]>([])
   const [isLoading, setIsLoading] = useState(true)
-  const [stats, setStats] = useState({
+  const [stats, setStats] = useState<Stats>({
     total: 0,
+    toCorrect: 0,
     validated: 0,
     pending: 0,
     rejected: 0,
-    totalVoters: 0,
+    totalVotes: 0,
     totalVotesUp: 0,
     totalVotesDown: 0,
   })
-  const [filter, setFilter] = useState<"all" | "validated" | "pending" | "rejected">("all")
+  const [filter, setFilter] = useState<ExampleFilter>("all")
 
   const handleCodeSubmit = () => {
     if (codeInput === EXPORT_CODE) {
@@ -75,61 +76,15 @@ export default function ExportPage() {
 
   const fetchExamples = useCallback(async () => {
     setIsLoading(true)
-    const supabase = createClient()
-
-    let query = supabase.from("examples").select("*").order("created_at", { ascending: false })
-
-    if (filter !== "all") {
-      query = query.eq("status", filter)
+    try {
+      const data = await fetchExportData(filter)
+      setExamples(data.examples)
+      setStats(data.stats)
+    } catch {
+      setExamples([])
+    } finally {
+      setIsLoading(false)
     }
-
-    const { data: filteredExamples } = await query
-
-    const { count: totalCount } = await supabase.from("examples").select("*", { count: "exact", head: true })
-
-    const { count: validatedCount } = await supabase
-      .from("examples")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "validated")
-
-    const { count: pendingCount } = await supabase
-      .from("examples")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "pending")
-
-    const { count: rejectedCount } = await supabase
-      .from("examples")
-      .select("*", { count: "exact", head: true })
-      .eq("status", "rejected")
-
-    const { count: totalVoters } = await supabase.from("votes").select("voter_hash", { count: "exact", head: true })
-
-    const { data: allExamples } = await supabase.from("examples").select("votes_up, votes_down")
-
-    let totalVotesUp = 0
-    let totalVotesDown = 0
-    if (allExamples) {
-      allExamples.forEach((e) => {
-        totalVotesUp += e.votes_up || 0
-        totalVotesDown += e.votes_down || 0
-      })
-    }
-
-    if (filteredExamples) {
-      setExamples(filteredExamples)
-    }
-
-    setStats({
-      total: totalCount || 0,
-      validated: validatedCount || 0,
-      pending: pendingCount || 0,
-      rejected: rejectedCount || 0,
-      totalVoters: totalVoters || 0,
-      totalVotesUp,
-      totalVotesDown,
-    })
-
-    setIsLoading(false)
   }, [filter])
 
   useEffect(() => {
@@ -140,9 +95,13 @@ export default function ExportPage() {
     const data = examples.map((e) => ({
       incorrect: e.incorrect_text,
       correct: e.correct_text,
+      error_types: e.error_types,
       tags: e.tags,
       source: e.source,
       status: e.status,
+      origin: e.origin,
+      batch: e.batch_name,
+      external_id: e.external_id,
       votes_up: e.votes_up,
       votes_down: e.votes_down,
     }))
@@ -157,13 +116,30 @@ export default function ExportPage() {
   }
 
   const downloadCSV = () => {
-    const headers = ["incorrect", "correct", "tags", "source", "status", "votes_up", "votes_down"]
+    const headers = [
+      "incorrect",
+      "correct",
+      "error_types",
+      "tags",
+      "source",
+      "status",
+      "origin",
+      "batch",
+      "external_id",
+      "votes_up",
+      "votes_down",
+    ]
+    const csvText = (value: string | null | undefined) => `"${(value ?? "").replace(/"/g, '""')}"`
     const rows = examples.map((e) => [
-      `"${e.incorrect_text.replace(/"/g, '""')}"`,
-      `"${e.correct_text.replace(/"/g, '""')}"`,
-      `"${(e.tags || []).join(", ")}"`,
-      `"${e.source || ""}"`,
-      `"${e.status}"`,
+      csvText(e.incorrect_text),
+      csvText(e.correct_text),
+      csvText((e.error_types || []).join(", ")),
+      csvText((e.tags || []).join(", ")),
+      csvText(e.source),
+      csvText(e.status),
+      csvText(e.origin),
+      csvText(e.batch_name),
+      csvText(e.external_id),
       e.votes_up || 0,
       e.votes_down || 0,
     ])
@@ -204,6 +180,7 @@ export default function ExportPage() {
                 <Input
                   id="export-code"
                   type="password"
+                  suppressHydrationWarning
                   placeholder="Entrez le code..."
                   value={codeInput}
                   onChange={(e) => {
@@ -236,9 +213,9 @@ export default function ExportPage() {
         </div>
 
         {/* Stats */}
-        <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <Database className="h-5 w-5 text-muted-foreground" />
                 <div>
@@ -249,7 +226,18 @@ export default function ExportPage() {
             </CardContent>
           </Card>
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
+              <div className="flex items-center gap-3">
+                <div className="h-3 w-3 rounded-full bg-primary" />
+                <div>
+                  <p className="text-2xl font-bold text-foreground">{stats.toCorrect}</p>
+                  <p className="text-xs text-muted-foreground">À corriger</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-border/50">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <div className="h-3 w-3 rounded-full bg-emerald-500" />
                 <div>
@@ -260,7 +248,7 @@ export default function ExportPage() {
             </CardContent>
           </Card>
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <div className="h-3 w-3 rounded-full bg-amber-500" />
                 <div>
@@ -271,7 +259,7 @@ export default function ExportPage() {
             </CardContent>
           </Card>
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <div className="h-3 w-3 rounded-full bg-destructive" />
                 <div>
@@ -283,20 +271,20 @@ export default function ExportPage() {
           </Card>
         </div>
 
-        <div className="mb-8 grid grid-cols-3 gap-4">
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <Users className="h-5 w-5 text-primary" />
                 <div>
-                  <p className="text-2xl font-bold text-foreground">{stats.totalVoters}</p>
+                  <p className="text-2xl font-bold text-foreground">{stats.totalVotes}</p>
                   <p className="text-xs text-muted-foreground">Votes totaux</p>
                 </div>
               </div>
             </CardContent>
           </Card>
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <ThumbsUp className="h-5 w-5 text-emerald-500" />
                 <div>
@@ -307,7 +295,7 @@ export default function ExportPage() {
             </CardContent>
           </Card>
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <ThumbsDown className="h-5 w-5 text-destructive" />
                 <div>
@@ -322,17 +310,18 @@ export default function ExportPage() {
         {/* Export Options */}
         <Card className="border-border/50">
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle>Télécharger le corpus</CardTitle>
                 <CardDescription>{examples.length} exemples disponibles à l'export.</CardDescription>
               </div>
               <Select value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
-                <SelectTrigger className="w-[160px]">
+                <SelectTrigger className="w-full sm:w-[160px]">
                   <SelectValue placeholder="Filtrer par statut" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tous ({stats.total})</SelectItem>
+                  <SelectItem value="to_correct">À corriger ({stats.toCorrect})</SelectItem>
                   <SelectItem value="validated">Validés ({stats.validated})</SelectItem>
                   <SelectItem value="pending">En attente ({stats.pending})</SelectItem>
                   <SelectItem value="rejected">Rejetés ({stats.rejected})</SelectItem>
@@ -360,9 +349,13 @@ export default function ExportPage() {
   {
     "incorrect": "Je suis alle au marché.",
     "correct": "Je suis allé au marché.",
+    "error_types": ["VOYELLES_SUPPRIMEES"],
     "tags": ["orthographe"],
     "source": null,
     "status": "validated",
+    "origin": "synthetic",
+    "batch": "rova-2026-11",
+    "external_id": "1",
     "votes_up": 2,
     "votes_down": 0
   },
@@ -380,8 +373,8 @@ export default function ExportPage() {
               <TabsContent value="csv" className="space-y-4">
                 <div className="rounded-lg bg-muted/50 p-4">
                   <pre className="overflow-x-auto text-xs text-muted-foreground">
-                    {`incorrect,correct,tags,source,status,votes_up,votes_down
-"Je suis alle au marché.","Je suis allé au marché.","orthographe","","validated",2,0
+                    {`incorrect,correct,error_types,tags,source,status,origin,batch,external_id,votes_up,votes_down
+"Je suis alle au marché.","Je suis allé au marché.","VOYELLES_SUPPRIMEES","orthographe","","validated","synthetic","rova-2026-11","1",2,0
 ...`}
                   </pre>
                 </div>
