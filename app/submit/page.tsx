@@ -4,7 +4,7 @@ import type React from "react"
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
+import { submitExample } from "@/app/actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
@@ -33,24 +33,14 @@ export default function SubmitPage() {
     }
 
     try {
-      const supabase = createClient()
-      const tagsArray = tags
-        .split(",")
-        .map((t) => t.trim())
-        .filter((t) => t.length > 0)
-
-      const { error: insertError } = await supabase.from("examples").insert({
-        incorrect_text: incorrectText.trim(),
-        correct_text: correctText.trim(),
-        tags: tagsArray,
-        source: source.trim() || null,
-      })
-
-      if (insertError) throw insertError
-
+      const result = await submitExample({ incorrectText, correctText, tags, source })
+      if (!result.ok) {
+        setError(result.error)
+        return
+      }
       router.push("/thanks")
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Une erreur est survenue.")
+    } catch {
+      setError("Une erreur est survenue.")
     } finally {
       setIsLoading(false)
     }

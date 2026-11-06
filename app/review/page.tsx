@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState, useCallback } from "react"
-import { createClient } from "@/lib/supabase/client"
+import { fetchPendingExamples, voteOnExample } from "@/app/actions"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -29,21 +29,18 @@ export default function ReviewPage() {
   const [votedIds, setVotedIds] = useState<Set<string>>(new Set())
   const [inputCode, setInputCode] = useState("")
   const [isUnlocked, setIsUnlocked] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   const fetchExamples = useCallback(async () => {
     setIsLoading(true)
-    const supabase = createClient()
-    const { data, error } = await supabase
-      .from("examples")
-      .select("*")
-      .eq("status", "pending")
-      .order("created_at", { ascending: false })
-      .limit(20)
-
-    if (!error && data) {
-      setExamples(data)
+    setLoadError(null)
+    try {
+      setExamples(await fetchPendingExamples())
+    } catch {
+      setLoadError("Impossible de charger les exemples. Vérifiez la connexion à la base de données.")
+    } finally {
+      setIsLoading(false)
     }
-    setIsLoading(false)
   }, [])
 
   useEffect(() => {
@@ -60,54 +57,31 @@ export default function ReviewPage() {
 
   const handleVote = async (exampleId: string, vote: 1 | -1) => {
     setVotingId(exampleId)
-    const supabase = createClient()
-    const voterHash = getVoterHash()
 
     try {
-      // Insert vote
-      const { error: voteError } = await supabase.from("votes").insert({
-        example_id: exampleId,
-        voter_hash: voterHash,
-        vote,
-      })
+      const result = await voteOnExample({ exampleId, voterHash: getVoterHash(), vote })
 
-      if (voteError) {
-        if (voteError.code === "23505") {
-          // Duplicate vote
-          alert("Vous avez déjà voté pour cet exemple.")
-        }
+      if (result.outcome === "duplicate") {
+        alert("Vous avez déjà voté pour cet exemple.")
+        return
+      }
+      if (result.outcome === "not_found") {
+        setExamples((prev) => prev.filter((e) => e.id !== exampleId))
+        return
+      }
+      if (result.outcome === "error") {
+        alert(result.error)
         return
       }
 
-      // Update vote count
-      const example = examples.find((e) => e.id === exampleId)
-      if (!example) return
-
-      const newVotesUp = example.votes_up + (vote === 1 ? 1 : 0)
-      const newVotesDown = example.votes_down + (vote === -1 ? 1 : 0)
-
-      let newStatus = example.status
-      if (newVotesUp >= 1) newStatus = "validated"
-      if (newVotesDown >= 1) newStatus = "rejected"
-
-      await supabase
-        .from("examples")
-        .update({
-          votes_up: newVotesUp,
-          votes_down: newVotesDown,
-          status: newStatus,
-        })
-        .eq("id", exampleId)
-
+      // Compteurs et statut sont calculés côté serveur, en transaction.
+      const updated = result.example
       setVotedIds((prev) => new Set(prev).add(exampleId))
 
-      // Refresh if status changed
-      if (newStatus !== "pending") {
+      if (updated.status !== "pending") {
         setExamples((prev) => prev.filter((e) => e.id !== exampleId))
       } else {
-        setExamples((prev) =>
-          prev.map((e) => (e.id === exampleId ? { ...e, votes_up: newVotesUp, votes_down: newVotesDown } : e)),
-        )
+        setExamples((prev) => prev.map((e) => (e.id === exampleId ? updated : e)))
       }
     } finally {
       setVotingId(null)
@@ -166,6 +140,10 @@ export default function ReviewPage() {
             Rafraîchir
           </Button>
         </div>
+
+        {loadError && (
+          <div className="mb-6 rounded-xl bg-destructive/10 p-4 text-sm text-destructive">{loadError}</div>
+        )}
 
         {examples.length === 0 ? (
           <Card className="border-border/50 text-center">
