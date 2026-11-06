@@ -105,7 +105,7 @@ Les codes vivent dans la table `secrets` (`type` = `validate` | `export` | `supe
 
 ### Types
 
-`lib/types.ts` déclare `BaseEntity` (colonnes de la table mère), étendu par `User`, `Batch`, `ErrorType`, `Example`, `Vote`, `Secret` et `ActivityLog`, plus `ExampleOrigin`, `Stats`, `ExampleStatus`, `ExampleFilter`, `SecretType`, `Auth0Profile` (serveur) et `SessionUser` (client) : miroirs manuels du schéma SQL. `lib/examples.ts` convertit les lignes pg via `toExample()` (les `timestamptz` arrivent en `Date`, les `count()`/`sum()` en chaînes bigint).
+`lib/types.ts` déclare `BaseEntity` (colonnes de la table mère), étendu par `User`, `Batch`, `ErrorType`, `Example`, `Vote`, `Secret` et `ActivityLog`, plus `ExampleOrigin`, `Stats`, `ExampleStatus`, `ExampleFilter`, `SecretType`, `Auth0Profile` (serveur) et `SessionUser` (client) : miroirs manuels du schéma SQL. `lib/examples.ts` convertit les lignes pg via `toExample()` (les `timestamptz` arrivent en `Date`, les `count()`/`sum()` en chaînes bigint). `EXAMPLE_FROM` joint `batches` et deux fois `users` (`ua` = auteur, `uc` = correcteur) pour fournir `batch_name`, `created_by_name` et `corrected_by_name` (prénom + nom, sinon nom Google, sinon e-mail) ; toute requête qui renvoie des `Example` doit passer par `EXAMPLE_SELECT`/`EXAMPLE_FROM`.
 
 ### UI et styles
 

@@ -271,6 +271,7 @@ Les champs « Phrase incorrecte » et « Phrase corrigée » sont obligatoires (
 ### Validation
 
 - La page liste les exemples `pending` du plus récent au plus ancien, par pages de 10 (pagination côté serveur, composant [components/pager.tsx](components/pager.tsx)). Quand une page se vide à force de votes, la suite de la file remonte automatiquement.
+- Chaque exemple indique qui l'a produit : « Soumis par … » pour une saisie directe, « Corrigé par … » pour un exemple importé, avec le nom choisi sur Mon compte, sinon le nom Google, sinon l'e-mail. La date affichée est celle de la correction quand il y en a une, sinon celle de la création.
 - Le votant est l'utilisateur connecté (`votes.created_by`). L'index unique `(example_id, created_by)` empêche un double vote, quel que soit le navigateur ; la violation (code Postgres `23505`) est renvoyée comme `outcome: "duplicate"`.
 - Le vote et la mise à jour des compteurs se font dans **une seule transaction SQL** avec incrément côté base (`votes_up = votes_up + 1`), donc deux votes simultanés ne se perdent pas.
 - **Seuils** : `VALIDATE_THRESHOLD` et `REJECT_THRESHOLD` dans [lib/examples.ts](lib/examples.ts), tous deux à 1 actuellement. Un vote négatif l'emporte sur un vote positif si les deux seuils sont atteints. L'exemple quitte la file dès qu'il change de statut.

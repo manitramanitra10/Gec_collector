@@ -7,13 +7,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Pager } from "@/components/pager"
-import { ThumbsUp, ThumbsDown, Loader2, RefreshCw, CheckCircle, Lock, Unlock } from "lucide-react"
+import { ThumbsUp, ThumbsDown, Loader2, RefreshCw, CheckCircle, Lock, Unlock, UserRound } from "lucide-react"
 import type { Example } from "@/lib/types"
 
 const ORIGIN_LABELS: Record<Example["origin"], string> = {
   manual: "Saisie directe",
   synthetic: "Synthétique",
   web: "Web",
+}
+
+/** « Soumis par … » pour une saisie directe, « Corrigé par … » pour un exemple importé. */
+function contributor(example: Example): string | null {
+  if (example.origin === "manual") {
+    return example.created_by_name ? `Soumis par ${example.created_by_name}` : null
+  }
+  return example.corrected_by_name ? `Corrigé par ${example.corrected_by_name}` : null
 }
 
 export function ReviewClient({ initiallyUnlocked }: { initiallyUnlocked: boolean }) {
@@ -213,12 +221,20 @@ export function ReviewClient({ initiallyUnlocked }: { initiallyUnlocked: boolean
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 space-y-1">
                       <CardTitle className="text-base font-medium">Exemple à valider</CardTitle>
-                      <CardDescription className="text-xs">
-                        {new Date(example.created_at).toLocaleDateString("fr-FR", {
-                          day: "numeric",
-                          month: "long",
-                          year: "numeric",
-                        })}
+                      <CardDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+                        <span>
+                          {new Date(example.corrected_at ?? example.created_at).toLocaleDateString("fr-FR", {
+                            day: "numeric",
+                            month: "long",
+                            year: "numeric",
+                          })}
+                        </span>
+                        {contributor(example) && (
+                          <span className="flex items-center gap-1 text-foreground/80">
+                            <UserRound className="h-3 w-3" />
+                            {contributor(example)}
+                          </span>
+                        )}
                       </CardDescription>
                     </div>
                     <div className="flex items-center gap-2 text-sm">

@@ -13,12 +13,21 @@ export const LOCK_MINUTES = 10
 
 // Toutes les requêtes filtrent sur is_delete = false : une ligne supprimée
 // logiquement n'est jamais lue, comptée ni modifiée.
+// Nom affichable d'un utilisateur : prénom + nom saisis, sinon nom Google, sinon e-mail.
+const userName = (alias: string) =>
+  `coalesce(nullif(trim(concat_ws(' ', ${alias}.first_name, ${alias}.last_name)), ''), ${alias}.display_name, ${alias}.email)`
+
 const EXAMPLE_COLUMNS = `
   e.id, e.incorrect_text, e.correct_text, e.tags, e.source, e.status, e.votes_up, e.votes_down,
   e.origin, e.batch_id, b.name AS batch_name, e.external_id, e.error_types,
   e.corrected_by, e.corrected_at, e.locked_by, e.locked_at,
+  ${userName("ua")} AS created_by_name, ${userName("uc")} AS corrected_by_name,
   e.is_delete, e.created_at, e.deleted_at, e.created_by, e.deleted_by`
-const EXAMPLE_FROM = `FROM examples e LEFT JOIN batches b ON b.id = e.batch_id`
+const EXAMPLE_FROM = `
+  FROM examples e
+  LEFT JOIN batches b ON b.id = e.batch_id
+  LEFT JOIN users ua ON ua.id = e.created_by
+  LEFT JOIN users uc ON uc.id = e.corrected_by`
 const EXAMPLE_SELECT = `SELECT ${EXAMPLE_COLUMNS} ${EXAMPLE_FROM}`
 
 function toIso(value: unknown): string {
@@ -48,6 +57,8 @@ function toExample(row: QueryResultRow): Example {
     corrected_at: toIsoOrNull(row.corrected_at),
     locked_by: row.locked_by ?? null,
     locked_at: toIsoOrNull(row.locked_at),
+    created_by_name: row.created_by_name ?? null,
+    corrected_by_name: row.corrected_by_name ?? null,
     is_delete: row.is_delete,
     created_at: toIso(row.created_at),
     deleted_at: toIsoOrNull(row.deleted_at),

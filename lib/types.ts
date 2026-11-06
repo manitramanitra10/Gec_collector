@@ -52,6 +52,10 @@ export interface Example extends BaseEntity {
   corrected_at: string | null
   locked_by: string | null
   locked_at: string | null
+  /** Nom affichable de l'auteur (`created_by`), joint depuis `users`. */
+  created_by_name: string | null
+  /** Nom affichable du correcteur (`corrected_by`), joint depuis `users`. */
+  corrected_by_name: string | null
 }
 
 /** Lot d'import, avec le nombre d'exemples actifs par statut. */
