@@ -11,11 +11,18 @@
 // (même lot, même id) est ignoré. Les codes d'erreur inconnus sont ajoutés au référentiel.
 // --user désigne l'utilisateur au nom duquel l'import est journalisé ; facultatif s'il
 // n'y a qu'un seul compte en base.
+//
+// Les lignes sont insérées par lots de BATCH_SIZE dans une seule transaction : rien
+// n'est écrit si une erreur survient, et un fichier de 170 000 lignes passe en quelques
+// minutes même sur une base distante.
 
 import { readFileSync } from "node:fs"
 import { basename } from "node:path"
 import pg from "pg"
 import { explainPgError, getConnectionString, loadProjectEnv, sslConfig } from "./lib.mjs"
+
+/** Lignes par INSERT (10 paramètres par ligne, limite PostgreSQL : 65 535 paramètres). */
+const BATCH_SIZE = 1000
 
 function parseArgs(argv) {
   const args = { _: [] }
@@ -61,6 +68,33 @@ if (!Array.isArray(items)) {
   fail("Le fichier doit contenir un tableau JSON d'objets { id, incorrect, correct, error_types }.")
 }
 
+// Validation et préparation des lignes avant toute écriture.
+const rows = []
+let invalid = 0
+const codes = new Set()
+for (const [index, item] of items.entries()) {
+  const incorrect = typeof item?.incorrect === "string" ? item.incorrect.trim() : ""
+  const correct = typeof item?.correct === "string" ? item.correct.trim() : ""
+  if (!incorrect || !correct) {
+    invalid++
+    if (invalid <= 20) console.warn(`Ligne ${index + 1} ignorée : "incorrect" ou "correct" manquant.`)
+    continue
+  }
+  const errorTypes = [
+    ...new Set(
+      (Array.isArray(item.error_types) ? item.error_types : [])
+        .filter((c) => typeof c === "string" && c.trim())
+        .map((c) => c.trim()),
+    ),
+  ]
+  for (const c of errorTypes) codes.add(c)
+  const tags = Array.isArray(item.tags) ? item.tags.filter((t) => typeof t === "string" && t.trim()) : []
+  const source = typeof item.source === "string" && item.source.trim() ? item.source.trim() : null
+  rows.push({ incorrect, correct, tags, source, externalId: String(item.id ?? index), errorTypes, payload: JSON.stringify(item) })
+}
+if (invalid > 20) console.warn(`… et ${invalid - 20} autre(s) ligne(s) invalide(s).`)
+console.log(`${rows.length} ligne(s) valide(s) sur ${items.length}, ${codes.size} type(s) d'erreur distinct(s).`)
+
 loadProjectEnv()
 const url = getConnectionString()
 const client = new pg.Client({ connectionString: url, ssl: sslConfig(url) })
@@ -99,12 +133,6 @@ try {
   }
 
   // Types d'erreur inconnus → ajoutés au référentiel.
-  const codes = new Set()
-  for (const item of items) {
-    for (const code of Array.isArray(item?.error_types) ? item.error_types : []) {
-      if (typeof code === "string" && code.trim()) codes.add(code.trim())
-    }
-  }
   const newCodes = []
   for (const code of codes) {
     const res = await client.query(
@@ -115,37 +143,32 @@ try {
     if (res.rowCount) newCodes.push(code)
   }
 
-  // Exemples.
+  // Exemples, par lots de BATCH_SIZE lignes.
   let inserted = 0
   let skipped = 0
-  let invalid = 0
-  for (const [index, item] of items.entries()) {
-    const incorrect = typeof item?.incorrect === "string" ? item.incorrect.trim() : ""
-    const correct = typeof item?.correct === "string" ? item.correct.trim() : ""
-    if (!incorrect || !correct) {
-      invalid++
-      console.warn(`Ligne ${index + 1} ignorée : "incorrect" ou "correct" manquant.`)
-      continue
-    }
-    const externalId = String(item.id ?? index)
-    const errorTypes = [
-      ...new Set(
-        (Array.isArray(item.error_types) ? item.error_types : [])
-          .filter((c) => typeof c === "string" && c.trim())
-          .map((c) => c.trim()),
-      ),
-    ]
-    const tags = Array.isArray(item.tags) ? item.tags.filter((t) => typeof t === "string" && t.trim()) : []
-    const source = typeof item.source === "string" && item.source.trim() ? item.source.trim() : null
-
+  const started = Date.now()
+  for (let offset = 0; offset < rows.length; offset += BATCH_SIZE) {
+    const chunk = rows.slice(offset, offset + BATCH_SIZE)
+    const params = []
+    const values = chunk.map((r, k) => {
+      const b = k * 10
+      params.push(r.incorrect, r.correct, r.tags, r.source, origin, batch.id, r.externalId, r.errorTypes, r.payload, actor.id)
+      return `($${b + 1}, $${b + 2}, $${b + 3}, $${b + 4}, 'to_correct', $${b + 5}, $${b + 6}, $${b + 7}, $${b + 8}, $${b + 9}::jsonb, $${b + 10})`
+    })
     const res = await client.query(
       `INSERT INTO examples
          (incorrect_text, correct_text, tags, source, status, origin, batch_id, external_id, error_types, import_payload, created_by)
-       VALUES ($1, $2, $3, $4, 'to_correct', $5, $6, $7, $8, $9::jsonb, $10)
+       VALUES ${values.join(", ")}
        ON CONFLICT (batch_id, external_id) WHERE batch_id IS NOT NULL AND external_id IS NOT NULL DO NOTHING`,
-      [incorrect, correct, tags, source, origin, batch.id, externalId, errorTypes, JSON.stringify(item), actor.id],
+      params,
     )
-    res.rowCount ? inserted++ : skipped++
+    inserted += res.rowCount
+    skipped += chunk.length - res.rowCount
+    const done = Math.min(offset + BATCH_SIZE, rows.length)
+    if (done === rows.length || (offset / BATCH_SIZE) % 10 === 9) {
+      const seconds = Math.round((Date.now() - started) / 1000)
+      console.log(`  ${done} / ${rows.length} lignes traitées (${seconds} s)`)
+    }
   }
 
   // Journal.

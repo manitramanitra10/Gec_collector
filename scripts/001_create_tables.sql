@@ -199,11 +199,20 @@ ON CONFLICT (type) DO NOTHING;
 
 -- Types d'erreur connus. Modifier un libellé : UPDATE error_types SET label = '…' WHERE code = '…';
 INSERT INTO error_types (code, label, sort_order) VALUES
-  ('VOYELLES_SUPPRIMEES',   'Voyelles supprimées',           10),
-  ('PONCTUATION_MANQUANTE', 'Ponctuation manquante',         20),
-  ('TYPO_DIST1',            'Faute de frappe (1 caractère)', 30),
-  ('ORDRE_DES_MOTS',        'Ordre des mots',                40),
-  ('CASSE',                 'Majuscules / minuscules',       50)
+  ('VOYELLES_SUPPRIMEES',   'Voyelles supprimées',            10),
+  ('PONCTUATION_MANQUANTE', 'Ponctuation manquante',          20),
+  ('PONCTUATION_EN_TROP',   'Ponctuation en trop',            22),
+  ('PONCTUATION',           'Ponctuation erronée',            24),
+  ('TYPO_DIST1',            'Faute de frappe (1 caractère)',  30),
+  ('TYPO_DIST2',            'Faute de frappe (2 caractères)', 32),
+  ('MOT_REEL',              'Mot réel substitué',             40),
+  ('ORDRE_DES_MOTS',        'Ordre des mots',                 50),
+  ('CASSE',                 'Majuscules / minuscules',        60),
+  ('APOSTROPHE_AMINY',      'Apostrophe (amin''ny)',          70),
+  ('CONNECTEUR_MANQUANT',   'Connecteur manquant',            80),
+  ('DECOUPAGE_MOTS',        'Découpage des mots',             90),
+  ('MOT_MANQUANT',          'Mot manquant',                   100),
+  ('MOT_EN_TROP',           'Mot en trop',                    110)
 ON CONFLICT (code) DO NOTHING;
 
 -- ---------------------------------------------------------------------------

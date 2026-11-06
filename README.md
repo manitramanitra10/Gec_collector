@@ -308,6 +308,7 @@ yarn import:examples fichier.json --batch "rova-2026-11" --origin synthetic --no
 ```
 
 - Le lot (`batches`) est créé s'il n'existe pas. `--origin` vaut `synthetic` (défaut) ou `web`.
+- Les lignes sont validées d'abord, puis insérées par lots de 1 000 dans une seule transaction : un fichier de 170 000 paires passe en une dizaine de secondes en local et en quelques minutes sur Supabase, et rien n'est écrit en cas d'erreur.
 - Chaque paire est insérée avec le statut `to_correct`, l'objet JSON d'origine conservé intact dans `import_payload`, et les codes d'erreur dédoublonnés dans `error_types`.
 - Rejouable : une paire déjà importée (même lot, même `id`) est ignorée.
 - Les codes d'erreur absents du référentiel `error_types` y sont ajoutés avec un libellé provisoire, à ajuster en base.

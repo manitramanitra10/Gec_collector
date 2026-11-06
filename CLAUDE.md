@@ -81,7 +81,7 @@ page "use client"  →  app/actions.ts ("use server")  →  lib/examples.ts  →
 
 ### Flux de correction (exemples importés)
 
-1. `scripts/import-examples.mjs` insère les paires en `to_correct` et journalise `batch.import` au nom de `--user`.
+1. `scripts/import-examples.mjs` valide tout le fichier, puis insère les paires en `to_correct` par INSERT multi-lignes de 1 000 (`BATCH_SIZE`, 10 paramètres par ligne) dans une seule transaction, et journalise `batch.import` au nom de `--user`. Ne pas revenir à une insertion ligne par ligne : à distance, c'est des heures pour un gros fichier.
 2. `/correct` (`app/correct/`, page serveur + `CorrectionWorkbench` client) appelle `claimNextExample` → `claimNextToCorrect()` : `UPDATE … FROM (SELECT … FOR UPDATE SKIP LOCKED)` qui réserve le plus ancien exemple non verrouillé (`locked_at` de plus de `LOCK_MINUTES` = 10 min) pour l'utilisateur. Passer (`example.skip`) prolonge la réservation, donc l'exemple ne revient qu'après expiration.
 3. `correctExample` → `submitCorrection()` : refuse si un autre correcteur détient un verrou valide (`outcome: "locked"`), sinon met à jour textes/types/tags/source, `status = 'pending'`, `corrected_by/at`, libère le verrou et journalise `example.correct` avec avant/après. `rejectExample` → `rejectCorrection()` passe en `rejected` (`example.reject`).
 4. `lib/diff.ts` (`wordDiff`, pur, utilisable côté client) surligne les mots qui diffèrent entre les deux phrases. `components/error-type-checkboxes.tsx` est partagé avec Soumettre ; les codes envoyés sont filtrés contre le référentiel dans l'action (`sanitizeErrorTypes`).
