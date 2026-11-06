@@ -7,6 +7,7 @@
     "db:seed": "node scripts/db-setup.mjs --seed",
     "db:setup": "node scripts/db-setup.mjs",
     "dev": "next dev",
+    "import:examples": "node scripts/import-examples.mjs",
     "lint": "eslint .",
     "start": "next start",
     "start:dev": "NODE_ENV=development next start",

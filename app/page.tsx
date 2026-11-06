@@ -1,7 +1,7 @@
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { FileText, CheckCircle, Download, ArrowRight, Sparkles, Zap, Users } from "lucide-react"
+import { FileText, CheckCircle, Download, ArrowRight, Sparkles, Zap, Users, PencilLine } from "lucide-react"
 
 export default function Home() {
   return (
@@ -11,7 +11,7 @@ export default function Home() {
         <div className="absolute top-20 left-10 h-72 w-72 rounded-full bg-primary/10 blur-3xl" />
         <div className="absolute top-40 right-10 h-64 w-64 rounded-full bg-accent/10 blur-3xl" />
 
-        <div className="relative mx-auto max-w-5xl px-6 py-24 text-center">
+        <div className="relative mx-auto max-w-5xl px-6 py-16 text-center sm:py-24">
           <div className="inline-flex items-center gap-2 rounded-full bg-primary/10 px-4 py-1.5 text-sm font-medium text-primary mb-6">
             <Sparkles className="h-4 w-4" />
             Contribuez a l'IA
@@ -59,8 +59,8 @@ export default function Home() {
         </div>
       </div>
 
-      <div className="mx-auto max-w-5xl px-6 pb-24">
-        <div className="grid gap-6 md:grid-cols-3">
+      <div className="mx-auto max-w-5xl px-6 pb-16 sm:pb-24">
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           <Card className="group border-border/50 bg-card/80 backdrop-blur hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 hover:-translate-y-1">
             <CardHeader>
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 group-hover:bg-primary/20 transition-colors">
@@ -68,13 +68,33 @@ export default function Home() {
               </div>
               <CardTitle className="mt-4 text-xl">Soumettre</CardTitle>
               <CardDescription className="text-base">
-                Ajoutez des paires de phrases incorrectes et corrigees pour enrichir le corpus.
+                Ajoutez des paires de phrases incorrectes et corrigées pour enrichir le corpus.
               </CardDescription>
             </CardHeader>
             <CardContent>
               <Button asChild variant="ghost" className="gap-2 px-0 text-primary hover:text-primary/80">
                 <Link href="/submit">
                   Commencer
+                  <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+
+          <Card className="group border-border/50 bg-card/80 backdrop-blur hover:shadow-lg hover:shadow-primary/5 transition-all duration-300 hover:-translate-y-1">
+            <CardHeader>
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 group-hover:bg-primary/20 transition-colors">
+                <PencilLine className="h-7 w-7 text-primary" />
+              </div>
+              <CardTitle className="mt-4 text-xl">Corriger</CardTitle>
+              <CardDescription className="text-base">
+                Relisez un par un les exemples importés et corrigez-les avant validation.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button asChild variant="ghost" className="gap-2 px-0 text-primary hover:text-primary/80">
+                <Link href="/correct">
+                  Corriger
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </Link>
               </Button>

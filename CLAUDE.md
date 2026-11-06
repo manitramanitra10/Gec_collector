@@ -16,6 +16,8 @@ Le lockfile de référence est `yarn.lock` (`pnpm-lock.yaml` est un stub vide).
 yarn install          # dépendances
 yarn db:setup         # crée la base nommée dans DATABASE_URL si absente + applique le schéma
 yarn db:seed          # idem + 5 exemples de démo (si la table est vide)
+yarn import:examples <fichier.json> --batch <nom> [--origin synthetic|web] [--user <email>]
+                      # importe un lot de paires en statut to_correct (rejouable)
 yarn dev              # serveur de dev sur http://localhost:3000
 yarn build            # build de production
 yarn typecheck        # tsc --noEmit
@@ -41,9 +43,13 @@ Next.js charge `.env.local` nativement ; `next.config.mjs` importe aussi `dotenv
 
 ### Base de données
 
-- Schéma : `scripts/001_create_tables.sql`. Table mère `base_entity` (`is_delete`, `created_at`, `deleted_at`) dont `examples`, `votes` et `secrets` héritent via `INHERITS`. Idempotent : sa section 3 met à niveau les tables créées avant l'héritage (ajout des colonnes + `ALTER TABLE … INHERIT`), ce qui couvre la base Supabase de prod. Il insère aussi les deux codes d'accès initiaux dans `secrets` avec `ON CONFLICT DO NOTHING`.
+- Schéma : `scripts/001_create_tables.sql`. Table mère `base_entity` (`is_delete`, `created_at`, `deleted_at`, `created_by`, `deleted_by`) dont `users`, `batches`, `error_types`, `examples`, `votes`, `secrets` et `activity_log` héritent via `INHERITS`. Idempotent : la section 3 met à niveau les tables créées avant l'héritage (ajout des colonnes + `ALTER TABLE … INHERIT`), la section 4 déclare les FK `created_by`/`deleted_by` → `users(id)` sur chaque table, ce qui couvre la base Supabase de prod. Il insère aussi les deux codes d'accès initiaux dans `secrets` avec `ON CONFLICT DO NOTHING`.
+- **Traçabilité** : toute écriture passe par `requireUser()` (`app/actions.ts`), qui fait l'upsert de la ligne `users` depuis le profil Auth0 et fournit l'`id` à mettre dans `created_by` (ou `deleted_by`). Un compte avec `is_delete = true` est refusé (« Ce compte est désactivé »). `first_name`/`last_name` sont saisis par l'utilisateur sur `/account` et jamais écrasés par l'upsert.
+- Votes : le votant est `votes.created_by` ; index unique partiel `(example_id, created_by) WHERE created_by IS NOT NULL`. `voter_hash` est nullable et ne concerne que les votes d'avant les comptes.
+- Données importées : `batches` (un lot par fichier, `origin` synthetic|web), `error_types` (référentiel des cases à cocher, codes inconnus ajoutés à l'import), et sur `examples` : `origin`, `batch_id`, `external_id`, `error_types[]`, `import_payload` (JSON d'origine intact), `corrected_by/at`, `locked_by/at`. Statuts : `to_correct` → `pending` → `validated|rejected`. Les colonnes et les CHECK de `status`/`origin` sont (re)posés par `ALTER TABLE` dans la section 3 du script : pour ajouter une valeur de statut, modifier le CHECK là **et** dans le `CREATE TABLE`.
+- **Journal d'activité obligatoire** : toute écriture faite pour un utilisateur appelle `logActivity()` (`lib/activity.ts`) **dans la même transaction** (`BEGIN … logActivity(entry, client) … COMMIT`), avec `actorId`, `action`, `entityType`, `entityId`, et `before`/`after`/`details` en JSON. Les codes d'action sont le type `ActivityAction` : en ajouter un avant d'implémenter une nouvelle action. `activity_log` hérite de `base_entity` mais ne se modifie ni ne se supprime jamais, même logiquement.
 - **Suppression logique uniquement** : jamais de `DELETE`. Supprimer = `UPDATE … SET is_delete = true, deleted_at = NOW()`. Toute requête de lecture, de comptage ou de mise à jour filtre sur `is_delete = false`. `softDeleteExample()` dans `lib/examples.ts` marque un exemple et ses votes en transaction ; elle n'est exposée par aucune action (pas d'authentification).
-- Héritage PostgreSQL : clés primaires, `UNIQUE` et clés étrangères ne sont pas héritées, chaque table déclare les siennes. Une nouvelle table métier doit être créée avec `INHERITS (base_entity)` **et** ajoutée à la liste de la section 3 du script.
+- Héritage PostgreSQL : clés primaires, `UNIQUE` et clés étrangères ne sont pas héritées, chaque table déclare les siennes. Une nouvelle table métier doit être créée avec `INHERITS (base_entity)` **et** ajoutée aux listes des sections 3 et 4 du script.
 - Démo : `scripts/002_seed.sql`, n'insère que si `examples` est vide.
 - `scripts/db-setup.mjs` se connecte à la base d'administration `postgres` du même serveur pour créer la base cible, puis applique les SQL. Pas d'outil de migration : une évolution de schéma se fait en modifiant le SQL (de façon idempotente) et `lib/types.ts` à la main.
 
@@ -63,30 +69,42 @@ page "use client"  →  app/actions.ts ("use server")  →  lib/examples.ts  →
 ### Authentification (Auth0, connexion Google)
 
 - `proxy.ts` (le `middleware.ts` de Next 16) appelle `auth0.middleware()` qui monte `/auth/login`, `/auth/callback`, `/auth/logout`, `/auth/profile`, puis **redirige toute requête sans session** vers `/auth/login?returnTo=…`. Tout le site est derrière le login ; seuls `/auth/*` et les fichiers statiques du matcher passent.
-- `lib/auth0.ts` : instance `Auth0Client` partagée, forcée sur la connexion `google-oauth2`, et `getSessionUser()` qui renvoie un `SessionUser` (type dans `lib/types.ts`, importable côté client).
-- `app/layout.tsx` est `async` et lit la session pour l'en-tête : toutes les pages sont donc dynamiques.
-- Chaque server action revérifie `auth0.getSession()` (seconde barrière derrière le proxy) et renvoie `Connexion requise.` sinon.
+- `lib/auth0.ts` : instance `Auth0Client` partagée, forcée sur la connexion `google-oauth2`, et `getSessionProfile()` qui renvoie un `Auth0Profile` (`sub`, e-mail, nom, photo), côté serveur uniquement.
+- `app/layout.tsx` est `async` : il lit la session, crée la ligne `users` à la première visite et passe un `SessionUser` à l'en-tête, avec le prénom/nom saisis de préférence au nom Google (`userDisplayName()` dans `lib/users.ts`). Toutes les pages sont donc dynamiques.
+- Chaque server action passe par `requireUser()` (seconde barrière derrière le proxy) : session → upsert `users` → `id`. Sans session : `Connexion requise.` ; compte désactivé : `Ce compte est désactivé.`.
+- `/account` (`app/account/`) : page serveur + formulaire client `ProfileForm` → action `updateProfile`, puis `router.refresh()` pour mettre à jour l'en-tête.
+- `/dashboard` (`app/dashboard/page.tsx`, 100 % serveur) : `getUserDashboard(userId, page)` dans `lib/dashboard.ts` agrège le journal (`activity_log` par action), le devenir des contributions (`examples` où `created_by` = moi et origine manuelle, ou `corrected_by` = moi, hors mes propres rejets à la correction), le reste à faire global, et le journal paginé joint à l'exemple ou au lot. Le rendu est dans `components/user-dashboard-view.tsx` (partagé avec `/supervision/[userId]`) ; toute nouvelle `ActivityAction` doit avoir son libellé dans `describe()` de ce composant.
+- **Télécharger l'activité** (`components/activity-export-button.tsx`) → action `fetchUserActivityExport({ userId? })` → `getUserActivityExport(user)` (`lib/dashboard.ts`) : résumé + contributions + journal (5 000 lignes max), téléchargé en JSON côté client. Sans `userId` : l'appelant ; avec un autre `userId` : exige `hasAccess("supervision")`. Journalisé en `activity.export`.
 - Le lien de déconnexion dans `components/header.tsx` est un `<a href="/auth/logout">` : **jamais un `<Link>`**, dont le préchargement déconnecterait l'utilisateur.
-- Les codes d'accès de `/review` et `/export` restent un verrou distinct, appliqué après la connexion. Le vote utilise toujours le `voter_hash` du navigateur, pas l'identité Auth0.
+- Les codes d'accès de `/review` et `/export` restent un verrou distinct, appliqué après la connexion. Le vote est identifié par `users.id` (`votes.created_by`), plus par un identifiant navigateur.
 - Tout compte Google est accepté ; une restriction (domaine, liste) se ferait par une Action Auth0 post-login ou une table `users`.
+
+### Flux de correction (exemples importés)
+
+1. `scripts/import-examples.mjs` insère les paires en `to_correct` et journalise `batch.import` au nom de `--user`.
+2. `/correct` (`app/correct/`, page serveur + `CorrectionWorkbench` client) appelle `claimNextExample` → `claimNextToCorrect()` : `UPDATE … FROM (SELECT … FOR UPDATE SKIP LOCKED)` qui réserve le plus ancien exemple non verrouillé (`locked_at` de plus de `LOCK_MINUTES` = 10 min) pour l'utilisateur. Passer (`example.skip`) prolonge la réservation, donc l'exemple ne revient qu'après expiration.
+3. `correctExample` → `submitCorrection()` : refuse si un autre correcteur détient un verrou valide (`outcome: "locked"`), sinon met à jour textes/types/tags/source, `status = 'pending'`, `corrected_by/at`, libère le verrou et journalise `example.correct` avec avant/après. `rejectExample` → `rejectCorrection()` passe en `rejected` (`example.reject`).
+4. `lib/diff.ts` (`wordDiff`, pur, utilisable côté client) surligne les mots qui diffèrent entre les deux phrases. `components/error-type-checkboxes.tsx` est partagé avec Soumettre ; les codes envoyés sont filtrés contre le référentiel dans l'action (`sanitizeErrorTypes`).
 
 ### Flux de validation
 
 1. `/submit` appelle `submitExample` → `INSERT` avec `status = 'pending'`, puis redirige vers `/thanks`.
-2. `/review` charge les 20 derniers `pending` via `fetchPendingExamples`. L'identité du votant est un `crypto.randomUUID()` stocké en `localStorage` sous la clé `voter_hash`.
-3. `voteOnExample` → `castVote` dans `lib/examples.ts` : **une transaction** qui insère dans `votes` puis fait `UPDATE examples SET votes_up = votes_up + …, status = CASE …`. La contrainte `UNIQUE(example_id, voter_hash)` lève `23505` → `outcome: "duplicate"` ; une FK invalide lève `23503` → `outcome: "not_found"`.
+2. `/review` charge les 20 derniers `pending` via `fetchPendingExamples`. Le votant est l'utilisateur de la session (`users.id`).
+3. `voteOnExample` → `castVote(exampleId, userId, vote)` dans `lib/examples.ts` : **une transaction** qui insère dans `votes` (`created_by = userId`) puis fait `UPDATE examples SET votes_up = votes_up + …, status = CASE …`. L'index unique `(example_id, created_by)` lève `23505` → `outcome: "duplicate"` ; une FK invalide lève `23503` → `outcome: "not_found"`.
 4. Seuils : `VALIDATE_THRESHOLD` et `REJECT_THRESHOLD` (tous deux à 1) en tête de `lib/examples.ts`. Le rejet l'emporte sur la validation. Un exemple quitte la file dès qu'il n'est plus `pending`.
 5. `/export` appelle `fetchExportData(filter)` qui renvoie la liste filtrée et les statistiques (une seule requête SQL à sous-requêtes). Les fichiers JSON/CSV sont générés **dans le navigateur**.
 
 ### Codes d'accès
 
-`/review` et le téléchargement sur `/export` sont protégés par un code saisi dans un champ. Les codes de référence vivent dans la table `secrets` (`type` = `validate` | `export`, `code` en clair ; types `SecretType` / `Secret` dans `lib/types.ts`).
+Les codes vivent dans la table `secrets` (`type` = `validate` | `export` | `supervision`, `code` en clair ; types `SecretType` / `Secret` dans `lib/types.ts`). Pour ajouter un type : le CHECK dans le `CREATE TABLE` **et** dans la section 3 du script, plus la ligne de seed.
 
-**État actuel** : les pages comparent encore à des **constantes en clair côté client** (`VALIDATION_CODE` dans `app/review/page.tsx`, `EXPORT_CODE` dans `app/export/page.tsx`), de même valeur que la table, et les server actions ne vérifient rien. C'est un garde-fou, pas une authentification. Ne pas les présenter comme sécurisés. Si un code change, le changer en base **et** dans la constante tant que la vérification serveur n'est pas branchée.
+- **Mécanisme serveur** (`lib/secrets.ts`) : `verifyCode(type, saisie)` compare au code en base (comparaison à temps constant) ; `grantAccess(type, code)` pose un cookie httpOnly `gec_access_<type>` = HMAC-SHA256(code, `AUTH0_SECRET`), 12 h ; `hasAccess(type)` recompare le cookie au code **actuel** en base, donc changer le code révoque les accès. `grantAccess`/`revokeAccess` écrivent des cookies : à appeler depuis une server action, jamais depuis un server component.
+- `/supervision` (`app/supervision/page.tsx`, sans lien dans la navigation) utilise ce mécanisme : `hasAccess("supervision")` sinon `UnlockForm` → action `unlockSupervision` (journalise `supervision.unlock` avec `{ ok }`, jamais le code) → `router.refresh()`. `/supervision/[userId]` réutilise `UserDashboardView` avec `perspective="other"` et `getUserDashboard(userId)`. Données : `lib/supervision.ts`.
+- **Encore côté client** : `/review` et le téléchargement sur `/export` comparent à des constantes en clair (`VALIDATION_CODE` dans `app/review/page.tsx`, `EXPORT_CODE` dans `app/export/page.tsx`), de même valeur que la table ; les server actions correspondantes ne vérifient rien. Garde-fou, pas authentification. Les migrer sur `lib/secrets.ts` est la suite logique ; d'ici là, changer ces codes en base **et** dans les constantes.
 
 ### Types
 
-`lib/types.ts` déclare `BaseEntity` (colonnes de la table mère), étendu par `Example`, `Vote` et `Secret`, plus `Stats`, `ExampleStatus`, `ExampleFilter`, `SecretType` : miroirs manuels du schéma SQL. `lib/examples.ts` convertit les lignes pg via `toExample()` (les `timestamptz` arrivent en `Date`, les `count()`/`sum()` en chaînes bigint).
+`lib/types.ts` déclare `BaseEntity` (colonnes de la table mère), étendu par `User`, `Batch`, `ErrorType`, `Example`, `Vote`, `Secret` et `ActivityLog`, plus `ExampleOrigin`, `Stats`, `ExampleStatus`, `ExampleFilter`, `SecretType`, `Auth0Profile` (serveur) et `SessionUser` (client) : miroirs manuels du schéma SQL. `lib/examples.ts` convertit les lignes pg via `toExample()` (les `timestamptz` arrivent en `Date`, les `count()`/`sum()` en chaînes bigint).
 
 ### UI et styles
 
@@ -105,4 +123,7 @@ page "use client"  →  app/actions.ts ("use server")  →  lib/examples.ts  →
 - Textes d'interface en français. Les pages existantes mélangent accents et absence d'accents (« corrigee », « Contribuez a l'IA ») ; préférer les accents corrects pour tout nouveau texte.
 - Imports absolus via `@/…` (racine du projet).
 - Requêtes SQL toujours paramétrées (`$1`, `$2`…), jamais interpolées.
+- Toute fonction d'écriture de `lib/*.ts` prend l'`id` de l'utilisateur qui agit, l'écrit dans `created_by`/`deleted_by` et journalise via `logActivity()` dans sa transaction. Pas d'écriture anonyme.
 - Mise en page des pages métier : `min-h-screen bg-background py-12` + conteneur `mx-auto max-w-{2xl,3xl} px-6` + `Card` shadcn. Le `Header` global est monté dans `app/layout.tsx`.
+- **Toute liste est paginée côté serveur** (`LIMIT/OFFSET` + `count(*)`, 10 par page) avec `components/pager.tsx` : mode `hrefFor` dans une page serveur (liens `?page=N`, aucun gestionnaire d'événement), mode `onPageChange` dans un composant client. Le serveur ramène la page demandée dans les bornes et renvoie `{ items, total, page, pageSize, pageCount }`.
+- **Tout doit rester utilisable sur mobile (360 px)** : empiler avec `flex-col` puis `sm:flex-row`, grilles `grid-cols-1 sm:grid-cols-N`, largeurs `w-full sm:w-[…]`, jamais de largeur fixe seule. Sous 640 px, la navigation passe par le panneau latéral `MobileMenu` de `components/header.tsx` (`Sheet`) ; au-dessus, liens en ligne et menu de compte `UserMenu`. Toute nouvelle entrée de navigation s'ajoute à `NAV_LINKS`, qui alimente les deux.

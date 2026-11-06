@@ -1,5 +1,5 @@
 import { Auth0Client } from "@auth0/nextjs-auth0/server"
-import type { SessionUser } from "./types"
+import type { Auth0Profile } from "./types"
 
 // Client Auth0 partagé par proxy.ts (garde d'entrée du site), le layout (affichage
 // de l'utilisateur) et les server actions (vérification de session).
@@ -12,13 +12,14 @@ export const auth0 = new Auth0Client({
   },
 })
 
-/** Session courante (server components, server actions), ou null si non connecté. */
-export async function getSessionUser(): Promise<SessionUser | null> {
+/** Profil Auth0 de la session courante (server components, server actions), ou null. */
+export async function getSessionProfile(): Promise<Auth0Profile | null> {
   const session = await auth0.getSession()
   if (!session) return null
   return {
-    name: session.user.name ?? null,
+    sub: session.user.sub,
     email: session.user.email ?? null,
+    name: session.user.name ?? null,
     picture: session.user.picture ?? null,
   }
 }

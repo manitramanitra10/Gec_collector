@@ -1,44 +1,17 @@
-// Prépare la base PostgreSQL locale :
+// Prépare la base PostgreSQL :
 //   1. crée la base nommée dans DATABASE_URL si elle n'existe pas ;
-//   2. applique scripts/001_create_tables.sql ;
+//   2. applique scripts/001_create_tables.sql (idempotent, met aussi à niveau une base existante) ;
 //   3. avec --seed, insère les données de démonstration de scripts/002_seed.sql.
 //
 // Usage : yarn db:setup   |   yarn db:seed
 
 import { readFileSync } from "node:fs"
-import { dirname, join } from "node:path"
-import { fileURLToPath } from "node:url"
-import { config as loadEnv } from "dotenv"
+import { join } from "node:path"
 import pg from "pg"
+import { explainPgError, getConnectionString, loadProjectEnv, scriptsDir, sslConfig } from "./lib.mjs"
 
-const here = dirname(fileURLToPath(import.meta.url))
-const root = join(here, "..")
-
-// Même ordre de priorité que Next.js : .env.local l'emporte sur .env.
-loadEnv({ path: [join(root, ".env.local"), join(root, ".env")], quiet: true })
-
-const url = process.env.DATABASE_URL ?? process.env.POSTGRES_URL
-if (!url) {
-  console.error("DATABASE_URL manquante : copiez .env.example vers .env.local et renseignez la connexion.")
-  process.exit(1)
-}
-
-// Même logique SSL que lib/db.ts : en clair en local, chiffré sans vérification ailleurs.
-const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
-function sslConfig(connectionString) {
-  let local = false
-  try {
-    local = LOCAL_HOSTS.has(new URL(connectionString).hostname)
-  } catch {}
-  const mode = process.env.DATABASE_SSL ?? (local ? "disable" : "require")
-  if (mode === "disable") return false
-  if (mode === "require") return { rejectUnauthorized: false }
-  if (mode === "verify-full") {
-    return process.env.DATABASE_SSL_CA ? { ca: process.env.DATABASE_SSL_CA, rejectUnauthorized: true } : true
-  }
-  console.error(`DATABASE_SSL invalide : "${mode}" (valeurs acceptées : disable, require, verify-full).`)
-  process.exit(1)
-}
+loadProjectEnv()
+const url = getConnectionString()
 const ssl = sslConfig(url)
 
 const target = new URL(url)
@@ -69,17 +42,16 @@ try {
   // 2. Schéma (+ 3. données de démo).
   const db = new pg.Client({ connectionString: url, ssl })
   await db.connect()
-  await db.query(readFileSync(join(here, "001_create_tables.sql"), "utf8"))
-  console.log("Schéma appliqué (tables examples, votes, secrets et index).")
+  await db.query(readFileSync(join(scriptsDir, "001_create_tables.sql"), "utf8"))
+  console.log("Schéma appliqué (tables users, batches, error_types, examples, votes, secrets, activity_log et index).")
   if (withSeed) {
-    await db.query(readFileSync(join(here, "002_seed.sql"), "utf8"))
+    await db.query(readFileSync(join(scriptsDir, "002_seed.sql"), "utf8"))
     const { rows } = await db.query("SELECT count(*)::int AS n FROM examples")
     console.log(`Données de démonstration : ${rows[0].n} exemple(s) en base.`)
   }
   await db.end()
 } catch (err) {
-  console.error("Échec de la préparation de la base :", err.message ?? err)
-  if (err.code === "28P01") console.error("Mot de passe refusé : vérifiez DATABASE_URL dans .env.local.")
-  if (err.code === "ECONNREFUSED") console.error("Connexion refusée : le service PostgreSQL est-il démarré ?")
+  console.error("Échec de la préparation de la base.")
+  explainPgError(err)
   process.exit(1)
 }

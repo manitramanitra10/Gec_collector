@@ -4,7 +4,9 @@ import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
 import { Header } from "@/components/header"
-import { getSessionUser } from "@/lib/auth0"
+import { getSessionProfile } from "@/lib/auth0"
+import { findUserBySub, upsertUserFromAuth0, userDisplayName } from "@/lib/users"
+import type { SessionUser } from "@/lib/types"
 
 const _geist = Geist({ subsets: ["latin"] })
 const _geistMono = Geist_Mono({ subsets: ["latin"] })
@@ -39,7 +41,19 @@ export default async function RootLayout({
 }>) {
   // Lecture du cookie de session : rend toutes les pages dynamiques, ce qui est
   // attendu puisque le site entier est derrière la connexion.
-  const user = await getSessionUser()
+  const profile = await getSessionProfile()
+  let user: SessionUser | null = null
+  if (profile) {
+    user = { name: profile.name, email: profile.email, picture: profile.picture }
+    try {
+      // Crée la ligne users à la première visite, puis privilégie le nom saisi
+      // sur la page « Mon compte » au nom Google.
+      const dbUser = (await findUserBySub(profile.sub)) ?? (await upsertUserFromAuth0(profile))
+      if (dbUser) user.name = userDisplayName(dbUser) ?? user.name
+    } catch (err) {
+      console.error("layout : lecture de l'utilisateur impossible", err)
+    }
+  }
 
   return (
     <html lang="fr">

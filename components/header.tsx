@@ -12,11 +12,22 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { ChevronDown, LogOut, Sparkles } from "lucide-react"
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet"
+import { cn } from "@/lib/utils"
+import { ChevronDown, LayoutDashboard, LogOut, Menu, Sparkles, UserRound } from "lucide-react"
 import type { SessionUser } from "@/lib/types"
 
 const NAV_LINKS = [
   { href: "/submit", label: "Soumettre" },
+  { href: "/correct", label: "Corriger" },
   { href: "/review", label: "Valider" },
   { href: "/export", label: "Exporter" },
 ]
@@ -38,7 +49,7 @@ export function Header({ user }: { user: SessionUser | null }) {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-lg supports-[backdrop-filter]:bg-background/60">
-      <div className="mx-auto flex h-16 max-w-5xl items-center justify-between gap-4 px-6">
+      <div className="mx-auto flex h-16 max-w-5xl items-center justify-between gap-3 px-4 sm:px-6">
         <Link
           href="/"
           className="flex items-center gap-2 font-bold text-lg text-foreground hover:opacity-80 transition-opacity"
@@ -49,7 +60,8 @@ export function Header({ user }: { user: SessionUser | null }) {
           <span>GEC Collector</span>
         </Link>
 
-        <div className="flex items-center gap-2">
+        {/* À partir de 640 px : liens en ligne et menu de compte. */}
+        <div className="hidden items-center gap-2 sm:flex">
           <nav className="flex items-center gap-1">
             {NAV_LINKS.map(({ href, label }) => (
               <Button
@@ -71,6 +83,9 @@ export function Header({ user }: { user: SessionUser | null }) {
             </>
           )}
         </div>
+
+        {/* Sous 640 px : un seul bouton qui ouvre un panneau latéral. */}
+        <MobileMenu user={user} pathname={pathname} />
       </div>
     </header>
   )
@@ -98,10 +113,10 @@ function UserMenu({ user }: { user: SessionUser }) {
             user={user}
             className="size-8 text-xs ring-2 ring-primary/20 transition group-hover:ring-primary/50 group-data-[state=open]:ring-primary/50"
           />
-          <span className="hidden max-w-[120px] truncate text-sm font-medium text-foreground sm:inline">
+          <span className="hidden max-w-[120px] truncate text-sm font-medium text-foreground md:inline">
             {firstName(user)}
           </span>
-          <ChevronDown className="hidden size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180 sm:inline" />
+          <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </button>
       </DropdownMenuTrigger>
 
@@ -114,6 +129,19 @@ function UserMenu({ user }: { user: SessionUser }) {
           </div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
+        <DropdownMenuItem asChild>
+          <Link href="/dashboard" className="cursor-pointer">
+            <LayoutDashboard className="size-4" />
+            Mon tableau de bord
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
+          <Link href="/account" className="cursor-pointer">
+            <UserRound className="size-4" />
+            Mon compte
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         {/* Lien brut volontaire : un <Link> préchargerait /auth/logout et déconnecterait l'utilisateur. */}
         <DropdownMenuItem asChild variant="destructive">
           <a href="/auth/logout" className="cursor-pointer">
@@ -123,5 +151,88 @@ function UserMenu({ user }: { user: SessionUser }) {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+function MobileMenu({ user, pathname }: { user: SessionUser | null; pathname: string }) {
+  const itemClass = "flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors"
+
+  return (
+    <Sheet>
+      <SheetTrigger asChild>
+        <Button variant="ghost" size="icon" className="sm:hidden" aria-label="Ouvrir le menu">
+          <Menu className="size-5" />
+        </Button>
+      </SheetTrigger>
+
+      <SheetContent side="right" className="w-72 gap-0 p-0">
+        <SheetHeader className="border-b border-border/40 p-4 pr-12 text-left">
+          <SheetTitle className="sr-only">Menu</SheetTitle>
+          <SheetDescription className="sr-only">Navigation et compte</SheetDescription>
+          {user ? (
+            <div className="flex items-center gap-3">
+              <UserAvatar user={user} className="size-10 text-sm" />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{user.name ?? firstName(user)}</p>
+                {user.email && <p className="truncate text-xs text-muted-foreground">{user.email}</p>}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm font-medium text-foreground">GEC Collector</p>
+          )}
+        </SheetHeader>
+
+        <nav className="flex flex-col gap-1 p-3">
+          {NAV_LINKS.map(({ href, label }) => (
+            <SheetClose asChild key={href}>
+              <Link
+                href={href}
+                className={cn(
+                  itemClass,
+                  pathname === href ? "bg-secondary text-secondary-foreground" : "text-foreground hover:bg-muted",
+                )}
+              >
+                {label}
+              </Link>
+            </SheetClose>
+          ))}
+
+          {user && (
+            <>
+              <div className="my-2 h-px bg-border/60" aria-hidden />
+              <SheetClose asChild>
+                <Link
+                  href="/dashboard"
+                  className={cn(
+                    itemClass,
+                    pathname === "/dashboard" ? "bg-secondary text-secondary-foreground" : "text-foreground hover:bg-muted",
+                  )}
+                >
+                  <LayoutDashboard className="size-4" />
+                  Mon tableau de bord
+                </Link>
+              </SheetClose>
+              <SheetClose asChild>
+                <Link
+                  href="/account"
+                  className={cn(
+                    itemClass,
+                    pathname === "/account" ? "bg-secondary text-secondary-foreground" : "text-foreground hover:bg-muted",
+                  )}
+                >
+                  <UserRound className="size-4" />
+                  Mon compte
+                </Link>
+              </SheetClose>
+              {/* Lien brut volontaire, voir UserMenu. */}
+              <a href="/auth/logout" className={cn(itemClass, "text-destructive hover:bg-destructive/10")}>
+                <LogOut className="size-4" />
+                Se déconnecter
+              </a>
+            </>
+          )}
+        </nav>
+      </SheetContent>
+    </Sheet>
   )
 }

@@ -26,6 +26,7 @@ export default function ExportPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [stats, setStats] = useState<Stats>({
     total: 0,
+    toCorrect: 0,
     validated: 0,
     pending: 0,
     rejected: 0,
@@ -94,9 +95,13 @@ export default function ExportPage() {
     const data = examples.map((e) => ({
       incorrect: e.incorrect_text,
       correct: e.correct_text,
+      error_types: e.error_types,
       tags: e.tags,
       source: e.source,
       status: e.status,
+      origin: e.origin,
+      batch: e.batch_name,
+      external_id: e.external_id,
       votes_up: e.votes_up,
       votes_down: e.votes_down,
     }))
@@ -111,13 +116,30 @@ export default function ExportPage() {
   }
 
   const downloadCSV = () => {
-    const headers = ["incorrect", "correct", "tags", "source", "status", "votes_up", "votes_down"]
+    const headers = [
+      "incorrect",
+      "correct",
+      "error_types",
+      "tags",
+      "source",
+      "status",
+      "origin",
+      "batch",
+      "external_id",
+      "votes_up",
+      "votes_down",
+    ]
+    const csvText = (value: string | null | undefined) => `"${(value ?? "").replace(/"/g, '""')}"`
     const rows = examples.map((e) => [
-      `"${e.incorrect_text.replace(/"/g, '""')}"`,
-      `"${e.correct_text.replace(/"/g, '""')}"`,
-      `"${(e.tags || []).join(", ")}"`,
-      `"${e.source || ""}"`,
-      `"${e.status}"`,
+      csvText(e.incorrect_text),
+      csvText(e.correct_text),
+      csvText((e.error_types || []).join(", ")),
+      csvText((e.tags || []).join(", ")),
+      csvText(e.source),
+      csvText(e.status),
+      csvText(e.origin),
+      csvText(e.batch_name),
+      csvText(e.external_id),
       e.votes_up || 0,
       e.votes_down || 0,
     ])
@@ -158,6 +180,7 @@ export default function ExportPage() {
                 <Input
                   id="export-code"
                   type="password"
+                  suppressHydrationWarning
                   placeholder="Entrez le code..."
                   value={codeInput}
                   onChange={(e) => {
@@ -190,9 +213,9 @@ export default function ExportPage() {
         </div>
 
         {/* Stats */}
-        <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <Database className="h-5 w-5 text-muted-foreground" />
                 <div>
@@ -203,7 +226,18 @@ export default function ExportPage() {
             </CardContent>
           </Card>
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
+              <div className="flex items-center gap-3">
+                <div className="h-3 w-3 rounded-full bg-primary" />
+                <div>
+                  <p className="text-2xl font-bold text-foreground">{stats.toCorrect}</p>
+                  <p className="text-xs text-muted-foreground">À corriger</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card className="border-border/50">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <div className="h-3 w-3 rounded-full bg-emerald-500" />
                 <div>
@@ -214,7 +248,7 @@ export default function ExportPage() {
             </CardContent>
           </Card>
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <div className="h-3 w-3 rounded-full bg-amber-500" />
                 <div>
@@ -225,7 +259,7 @@ export default function ExportPage() {
             </CardContent>
           </Card>
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <div className="h-3 w-3 rounded-full bg-destructive" />
                 <div>
@@ -237,9 +271,9 @@ export default function ExportPage() {
           </Card>
         </div>
 
-        <div className="mb-8 grid grid-cols-3 gap-4">
+        <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <Users className="h-5 w-5 text-primary" />
                 <div>
@@ -250,7 +284,7 @@ export default function ExportPage() {
             </CardContent>
           </Card>
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <ThumbsUp className="h-5 w-5 text-emerald-500" />
                 <div>
@@ -261,7 +295,7 @@ export default function ExportPage() {
             </CardContent>
           </Card>
           <Card className="border-border/50">
-            <CardContent className="pt-6">
+            <CardContent className="px-4 pt-5 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-3">
                 <ThumbsDown className="h-5 w-5 text-destructive" />
                 <div>
@@ -276,17 +310,18 @@ export default function ExportPage() {
         {/* Export Options */}
         <Card className="border-border/50">
           <CardHeader>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <CardTitle>Télécharger le corpus</CardTitle>
                 <CardDescription>{examples.length} exemples disponibles à l'export.</CardDescription>
               </div>
               <Select value={filter} onValueChange={(v) => setFilter(v as typeof filter)}>
-                <SelectTrigger className="w-[160px]">
+                <SelectTrigger className="w-full sm:w-[160px]">
                   <SelectValue placeholder="Filtrer par statut" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tous ({stats.total})</SelectItem>
+                  <SelectItem value="to_correct">À corriger ({stats.toCorrect})</SelectItem>
                   <SelectItem value="validated">Validés ({stats.validated})</SelectItem>
                   <SelectItem value="pending">En attente ({stats.pending})</SelectItem>
                   <SelectItem value="rejected">Rejetés ({stats.rejected})</SelectItem>
@@ -314,9 +349,13 @@ export default function ExportPage() {
   {
     "incorrect": "Je suis alle au marché.",
     "correct": "Je suis allé au marché.",
+    "error_types": ["VOYELLES_SUPPRIMEES"],
     "tags": ["orthographe"],
     "source": null,
     "status": "validated",
+    "origin": "synthetic",
+    "batch": "rova-2026-11",
+    "external_id": "1",
     "votes_up": 2,
     "votes_down": 0
   },
@@ -334,8 +373,8 @@ export default function ExportPage() {
               <TabsContent value="csv" className="space-y-4">
                 <div className="rounded-lg bg-muted/50 p-4">
                   <pre className="overflow-x-auto text-xs text-muted-foreground">
-                    {`incorrect,correct,tags,source,status,votes_up,votes_down
-"Je suis alle au marché.","Je suis allé au marché.","orthographe","","validated",2,0
+                    {`incorrect,correct,error_types,tags,source,status,origin,batch,external_id,votes_up,votes_down
+"Je suis alle au marché.","Je suis allé au marché.","VOYELLES_SUPPRIMEES","orthographe","","validated","synthetic","rova-2026-11","1",2,0
 ...`}
                   </pre>
                 </div>
