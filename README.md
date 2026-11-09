@@ -514,6 +514,7 @@ Contenu : totaux du corpus, progression de chaque lot (validés, en attente, rej
 - Palette : primaire teal, accent corail, token supplémentaire `--success` (vert) utilisable en `bg-success`, `text-success`, etc.
 - Un thème sombre est défini sous la classe `.dark`, mais aucun basculement n'est câblé (le `ThemeProvider` n'est pas monté dans le layout).
 - Police Geist et Geist Mono chargées via `next/font/google`.
+- **Icône du site** : la source vectorielle est `public/gasy_icon.svg` (emblème tracé automatiquement, 826 Ko, trop lourd pour être servi comme favicon). Les fichiers réellement déclarés dans `app/layout.tsx` en sont dérivés : `favicon.ico` (16, 32, 48 px), `icon-32x32.png`, `icon-192x192.png` et `apple-icon.png` (180 px). Pour changer d'icône, remplacer le SVG puis régénérer les PNG avec `sharp` (présent dans `node_modules`) et reconstruire l'ICO, comme décrit dans CLAUDE.md.
 - Ajout de composants shadcn/ui : `npx shadcn@latest add <nom>` (configuration dans `components.json`).
 
 ## Limites connues

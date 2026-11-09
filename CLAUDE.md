@@ -114,6 +114,7 @@ Les codes vivent dans la table `secrets` (`type` = `validate` | `export` | `supe
 - `app/globals.css` est la feuille réellement importée (par `app/layout.tsx`). `styles/globals.css` est une copie obsolète du thème neutre v0, non importée.
 - Le mode sombre est défini par la variante `.dark` mais `components/theme-provider.tsx` n'est pas monté dans le layout : aucun basculement n'est câblé.
 - `components/confetti.tsx` dépend de la classe `.confetti-piece` et du keyframe `confetti-fall` déclarés dans `app/globals.css`.
+- **Icônes** : source `public/gasy_icon.svg` (826 Ko, jamais référencée dans le HTML). Dérivés déclarés dans `metadata.icons` de `app/layout.tsx` : `public/favicon.ico` (ICO à PNG incorporés 16/32/48), `icon-32x32.png`, `icon-192x192.png`, `apple-icon.png` (180). Régénération : `sharp` (dépendance de Next, dans `node_modules`) pour les PNG avec `density: 384` et `fit: "contain"`, puis ICO assemblé en Node (en-tête 6 octets + une entrée de 16 octets par taille + les PNG). Pas de Pillow ni d'ImageMagick sur le poste.
 
 ### Doublons à connaître
 

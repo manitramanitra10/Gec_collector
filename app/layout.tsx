@@ -15,21 +15,15 @@ export const metadata: Metadata = {
   title: "GEC Data Collection",
   description: "Plateforme de collecte de données pour la correction grammaticale",
   generator: "v0.app",
+  // Icônes générées depuis public/gasy_icon.svg (source vectorielle, trop lourde pour
+  // être servie telle quelle) : voir le README, section Thème et design.
   icons: {
     icon: [
-      {
-        url: "/icon-light-32x32.png",
-        media: "(prefers-color-scheme: light)",
-      },
-      {
-        url: "/icon-dark-32x32.png",
-        media: "(prefers-color-scheme: dark)",
-      },
-      {
-        url: "/icon.svg",
-        type: "image/svg+xml",
-      },
+      { url: "/favicon.ico", sizes: "48x48 32x32 16x16" },
+      { url: "/icon-32x32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon-192x192.png", sizes: "192x192", type: "image/png" },
     ],
+    shortcut: "/favicon.ico",
     apple: "/apple-icon.png",
   },
 }
