@@ -193,7 +193,7 @@ export function ExportClient({ initialStats, initiallyUnlocked }: Props) {
 
         <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
           {tile(stats.total, "Total", <Database className="h-5 w-5 text-muted-foreground" />)}
-          {tile(stats.toCorrect, "À corriger", <div className="h-3 w-3 rounded-full bg-primary" />)}
+          {tile(stats.toCorrect, "À lisser", <div className="h-3 w-3 rounded-full bg-primary" />)}
           {tile(stats.validated, "Validés", <div className="h-3 w-3 rounded-full bg-emerald-500" />)}
           {tile(stats.pending, "En attente", <div className="h-3 w-3 rounded-full bg-amber-500" />)}
           {tile(stats.rejected, "Rejetés", <div className="h-3 w-3 rounded-full bg-destructive" />)}
@@ -222,7 +222,7 @@ export function ExportClient({ initialStats, initiallyUnlocked }: Props) {
                 <SelectContent>
                   <SelectItem value="validated">Validés ({stats.validated})</SelectItem>
                   <SelectItem value="pending">En attente ({stats.pending})</SelectItem>
-                  <SelectItem value="to_correct">À corriger ({stats.toCorrect})</SelectItem>
+                  <SelectItem value="to_correct">À lisser ({stats.toCorrect})</SelectItem>
                   <SelectItem value="rejected">Rejetés ({stats.rejected})</SelectItem>
                   <SelectItem value="all">Tous ({stats.total})</SelectItem>
                 </SelectContent>

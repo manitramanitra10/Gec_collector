@@ -1,22 +1,26 @@
 import { NextResponse, type NextRequest } from "next/server"
 import { auth0 } from "@/lib/auth0"
 
-// Garde d'entrée : tout le site est derrière la connexion Google (Auth0).
-// Seules les routes /auth/* (login, callback, logout, profile), montées par le SDK,
+// Pages consultables sans session. Tout le reste exige la connexion Google.
+const PUBLIC_PATHS = new Set(["/"])
+
+// Garde d'entrée : le site est derrière la connexion Google (Auth0), sauf la page
+// d'accueil. Les routes /auth/* (login, callback, logout, profile), montées par le SDK,
 // et les fichiers statiques exclus par le matcher restent accessibles sans session.
 // Les appels de server actions sont des requêtes POST sur les pages : ils passent
 // aussi par ici et sont redirigés s'il n'y a pas de session.
 export async function proxy(request: NextRequest) {
   const authResponse = await auth0.middleware(request)
+  const { pathname, search, origin } = request.nextUrl
 
-  if (request.nextUrl.pathname.startsWith("/auth")) {
+  if (pathname.startsWith("/auth") || PUBLIC_PATHS.has(pathname)) {
     return authResponse
   }
 
   const session = await auth0.getSession(request)
   if (!session) {
-    const loginUrl = new URL("/auth/login", request.nextUrl.origin)
-    loginUrl.searchParams.set("returnTo", request.nextUrl.pathname + request.nextUrl.search)
+    const loginUrl = new URL("/auth/login", origin)
+    loginUrl.searchParams.set("returnTo", pathname + search)
     return NextResponse.redirect(loginUrl)
   }
 

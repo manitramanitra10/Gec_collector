@@ -41,7 +41,7 @@ function BatchProgress({ batch }: { batch: Batch }) {
       </div>
       <p className="text-[11px] text-muted-foreground">
         {batch.counts.validated} validé(s) · {batch.counts.pending} en attente · {batch.counts.rejected} rejeté(s) ·{" "}
-        {batch.counts.to_correct} à corriger
+        {batch.counts.to_correct} à lisser
       </p>
     </div>
   )
@@ -76,7 +76,7 @@ export default async function SupervisionPage() {
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
             <StatTile value={overview.usersCount} label="Utilisateurs" icon={<Users className="h-5 w-5 text-primary" />} />
             <StatTile value={overview.stats.total} label="Exemples" icon={<Database className="h-5 w-5 text-muted-foreground" />} />
-            <StatTile value={overview.stats.toCorrect} label="À corriger" icon={<PencilLine className="h-5 w-5 text-primary" />} />
+            <StatTile value={overview.stats.toCorrect} label="À lisser" icon={<PencilLine className="h-5 w-5 text-primary" />} />
             <StatTile value={overview.stats.pending} label="En attente" icon={<div className="h-3 w-3 rounded-full bg-amber-500" />} />
             <StatTile value={overview.stats.validated} label="Validés" icon={<ThumbsUp className="h-5 w-5 text-success" />} />
             <StatTile value={overview.stats.rejected} label="Rejetés" icon={<ThumbsDown className="h-5 w-5 text-destructive" />} />
@@ -111,7 +111,7 @@ export default async function SupervisionPage() {
                     <tr className="border-b border-border/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
                       <th className="px-4 py-3 font-medium sm:px-6">Utilisateur</th>
                       <th className="px-3 py-3 text-right font-medium">Soumis</th>
-                      <th className="px-3 py-3 text-right font-medium">Corrigés</th>
+                      <th className="px-3 py-3 text-right font-medium">Lissés</th>
                       <th className="px-3 py-3 text-right font-medium">Votes</th>
                       <th className="px-3 py-3 text-right font-medium">Contributions</th>
                       <th className="px-3 py-3 font-medium">Dernière activité</th>
@@ -177,7 +177,7 @@ export default async function SupervisionPage() {
               </div>
               <p className="px-4 py-3 text-[11px] text-muted-foreground sm:px-6">
                 Votes : positifs / négatifs. Contributions : validées / en attente / rejetées, hors rejets faits par
-                l'utilisateur lui-même à la correction.
+                l'utilisateur lui-même au lissage.
               </p>
             </CardContent>
           </Card>

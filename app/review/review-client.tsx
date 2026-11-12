@@ -16,12 +16,12 @@ const ORIGIN_LABELS: Record<Example["origin"], string> = {
   web: "Web",
 }
 
-/** « Soumis par … » pour une saisie directe, « Corrigé par … » pour un exemple importé. */
+/** « Soumis par … » pour une saisie directe, « Lissé par … » pour un exemple importé. */
 function contributor(example: Example): string | null {
   if (example.origin === "manual") {
     return example.created_by_name ? `Soumis par ${example.created_by_name}` : null
   }
-  return example.corrected_by_name ? `Corrigé par ${example.corrected_by_name}` : null
+  return example.corrected_by_name ? `Lissé par ${example.corrected_by_name}` : null
 }
 
 export function ReviewClient({ initiallyUnlocked }: { initiallyUnlocked: boolean }) {

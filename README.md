@@ -152,14 +152,14 @@ app/
   account/            Page « Mon compte » : prénom et nom facultatifs
   dashboard/          Page « Mon tableau de bord » : mes actions, leur devenir, reste à faire
   supervision/        Route de suivi (code vérifié côté serveur) : vue d'ensemble et détail par utilisateur
-  correct/            Page Corriger : relecture un par un des exemples importés
+  correct/            Page Lissage : relecture un par un des exemples importés
   submit/             Formulaire de soumission (page serveur + formulaire client)
   review/page.tsx     File de validation (protégée par code)
   export/page.tsx     Statistiques et export JSON/CSV (téléchargement protégé par code)
   thanks/page.tsx     Page de remerciement avec confettis
   globals.css         Thème (variables CSS, Tailwind v4, keyframes confettis)
 components/
-  error-type-checkboxes.tsx  Cases à cocher des types d'erreur (Soumettre, Corriger)
+  error-type-checkboxes.tsx  Cases à cocher des types d'erreur (Soumettre, Lissage)
   activity-export-button.tsx Boutons Télécharger l'activité (JSON) et Rafraîchir
   pager.tsx           Pagination partagée (liens côté serveur, boutons côté client)
   user-dashboard-view.tsx    Sections du tableau de bord d'un utilisateur (/dashboard, /supervision/<id>)
@@ -225,6 +225,7 @@ L'entrée du site est réservée aux utilisateurs connectés avec un compte Goog
 - [lib/auth0.ts](lib/auth0.ts) instancie le client Auth0 avec `connection: "google-oauth2"` : le visiteur arrive directement sur Google, sans écran de choix Auth0. Supprimez cette option pour proposer toutes les connexions activées sur le tenant.
 - La session est un cookie chiffré avec `AUTH0_SECRET`. Le layout la lit pour afficher le nom, l'avatar et le menu de compte dans l'en-tête ; les server actions la revérifient avant toute requête SQL.
 - Le lien de déconnexion est une balise `<a>` brute : un `<Link>` Next.js préchargerait `/auth/logout` et déconnecterait l'utilisateur.
+- **Page d'accueil publique** : `/` est consultable sans connexion (liste `PUBLIC_PATHS` dans [proxy.ts](proxy.ts)) et propose « Se connecter avec Google » ; toutes les autres pages exigent la session. L'ancienne adresse `/correct` redirige définitivement vers `/lissage` (`redirects()` de `next.config.mjs`).
 - Tout compte Google est accepté. Pour restreindre (par exemple au domaine `sonapar.mg`), ajoutez une Action post-login dans Auth0 qui refuse les autres adresses.
 
 ### Comptes utilisateurs et traçabilité
@@ -239,7 +240,7 @@ L'entrée du site est réservée aux utilisateurs connectés avec un compte Goog
   ```
 - Un compte peut être désactivé avec `UPDATE users SET is_delete = true, deleted_at = NOW() WHERE email = '…'` : ses actions sont alors refusées avec « Ce compte est désactivé ».
 - La page **Mon compte** (`/account`, menu de l'avatar) permet de saisir un prénom et un nom, facultatifs. S'ils sont renseignés, ils remplacent le nom Google dans la barre de navigation. Google ne les écrase jamais.
-- La page **Mon tableau de bord** (`/dashboard`, menu de l'avatar) résume, pour l'utilisateur connecté : ce qu'il a fait (soumissions, corrections, votes, rejets, imports, d'après le journal), ce que sont devenues ses contributions (validées, en attente, rejetées, avec le taux de validation), ce qui reste à faire pour tout le monde (à corriger, à valider sans son vote), et tout son journal d'activité par pages de 10 (`/dashboard?page=N`) avec l'exemple concerné et son statut actuel. Le bouton **Télécharger l'activité** va chercher tout ce que l'utilisateur a fait et le livre en un fichier JSON : résumé, contributions avec leur statut actuel, journal complet (5 000 lignes au plus). Le bouton Rafraîchir recharge les chiffres sans quitter la page. Les exemples qu'il a lui-même rejetés à la correction ne comptent pas comme contributions.
+- La page **Mon tableau de bord** (`/dashboard`, menu de l'avatar) résume, pour l'utilisateur connecté : ce qu'il a fait (soumissions, corrections, votes, rejets, imports, d'après le journal), ce que sont devenues ses contributions (validées, en attente, rejetées, avec le taux de validation), ce qui reste à faire pour tout le monde (à lisser, à valider sans son vote), et tout son journal d'activité par pages de 10 (`/dashboard?page=N`) avec l'exemple concerné et son statut actuel. Le bouton **Télécharger l'activité** va chercher tout ce que l'utilisateur a fait et le livre en un fichier JSON : résumé, contributions avec leur statut actuel, journal complet (5 000 lignes au plus). Le bouton Rafraîchir recharge les chiffres sans quitter la page. Les exemples qu'il a lui-même rejetés à la correction ne comptent pas comme contributions.
 
 ### Configuration du tenant Auth0
 
@@ -258,7 +259,7 @@ Le plan Free d'Auth0 couvre 25 000 utilisateurs actifs par mois et les connexion
 yarn import:examples ──► INSERT examples (to_correct, origin synthetic/web)
                               │
 Accueil (/)                   ▼
-   ├─► Corriger (/correct)  ──► claimNextExample / correctExample ──► status pending
+   ├─► Lissage (/lissage)  ──► claimNextExample / correctExample ──► status pending
    ├─► Soumettre (/submit)  ──► submitExample ──► INSERT examples (pending) ──► Merci (/thanks)
    ├─► Valider (/review)    ──► code requis ──► voteOnExample ──► transaction votes + examples
    └─► Exporter (/export)   ──► fetchExportData ──► code requis ──► téléchargement JSON/CSV
@@ -271,7 +272,7 @@ Les champs « Phrase incorrecte » et « Phrase corrigée » sont obligatoires (
 ### Validation
 
 - La page liste les exemples `pending` du plus récent au plus ancien, par pages de 10 (pagination côté serveur, composant [components/pager.tsx](components/pager.tsx)). Quand une page se vide à force de votes, la suite de la file remonte automatiquement.
-- Chaque exemple indique qui l'a produit : « Soumis par … » pour une saisie directe, « Corrigé par … » pour un exemple importé, avec le nom choisi sur Mon compte, sinon le nom Google, sinon l'e-mail. La date affichée est celle de la correction quand il y en a une, sinon celle de la création.
+- Chaque exemple indique qui l'a produit : « Soumis par … » pour une saisie directe, « Lissé par … » pour un exemple importé, avec le nom choisi sur Mon compte, sinon le nom Google, sinon l'e-mail. La date affichée est celle de la correction quand il y en a une, sinon celle de la création.
 - Le votant est l'utilisateur connecté (`votes.created_by`). L'index unique `(example_id, created_by)` empêche un double vote, quel que soit le navigateur ; la violation (code Postgres `23505`) est renvoyée comme `outcome: "duplicate"`.
 - Le vote et la mise à jour des compteurs se font dans **une seule transaction SQL** avec incrément côté base (`votes_up = votes_up + 1`), donc deux votes simultanés ne se perdent pas.
 - **Seuils** : `VALIDATE_THRESHOLD` et `REJECT_THRESHOLD` dans [lib/examples.ts](lib/examples.ts), tous deux à 1 actuellement. Un vote négatif l'emporte sur un vote positif si les deux seuils sont atteints. L'exemple quitte la file dès qu'il change de statut.
@@ -279,7 +280,7 @@ Les champs « Phrase incorrecte » et « Phrase corrigée » sont obligatoires (
 ### Export
 
 - Les statistiques (total, par statut, nombre de votes) sont calculées côté serveur en une passe sur un index.
-- Le filtre de statut (validés par défaut, en attente, à corriger, rejetés, tous) s'applique au fichier exporté.
+- Le filtre de statut (validés par défaut, en attente, à lisser, rejetés, tous) s'applique au fichier exporté.
 - Le téléchargement est servi par la route [app/api/export/route.ts](app/api/export/route.ts), qui exige le code d'export puis **envoie le fichier en flux**, par tranches de 2 000 lignes lues avec une pagination par clé : rien n'est chargé en mémoire ni dans le navigateur, quel que soit le volume. Fichiers nommés `gec-corpus-<filtre>-<AAAA-MM-JJ>.json` ou `.csv`. Sur Vercel, la route dispose de 60 secondes, ce qui couvre largement le corpus actuel.
 
 ## Import et correction
@@ -316,12 +317,12 @@ yarn import:examples fichier.json --batch "rova-2026-11" --origin synthetic --no
 - Les codes d'erreur absents du référentiel `error_types` y sont ajoutés avec un libellé provisoire, à ajuster en base.
 - `--user` désigne le compte au nom duquel l'import est journalisé (`batch.import`). Il est facultatif s'il n'y a qu'un compte en base. Connectez-vous une fois à l'application avant le premier import.
 
-### Page Corriger
+### Page Lissage
 
 - Accessible à tout utilisateur connecté, sans code. Filtre par lot, compteur des exemples restants.
 - Un seul exemple à la fois, réservé dix minutes au correcteur (`locked_by`, `locked_at`) pour que plusieurs personnes puissent corriger sans se croiser. Un exemple passé reste réservé jusqu'à l'expiration et ne revient donc pas immédiatement.
 - Les deux phrases sont éditables ; sous chacune, les mots qui diffèrent de l'autre phrase sont surlignés. Les types d'erreur sont pré-cochés depuis le fichier.
-- **Envoyer en validation** (ou Ctrl+Entrée) enregistre la correction, note `corrected_by` et `corrected_at`, et passe l'exemple en `pending`. **Passer** le laisse à corriger. **Rejeter** le passe en `rejected` sans validation.
+- **Envoyer en validation** (ou Ctrl+Entrée) enregistre la correction, note `corrected_by` et `corrected_at`, et passe l'exemple en `pending`. **Passer** le laisse à lisser. **Rejeter** le passe en `rejected` sans validation.
 - Chaque geste est journalisé : `example.correct` (avec les textes avant et après), `example.skip`, `example.reject`.
 
 ## Modèle de données
@@ -374,7 +375,7 @@ Plus les colonnes héritées de `base_entity` (`created_by` = qui a importé).
 
 ### Table `error_types`
 
-Référentiel des types d'erreur, affiché en cases à cocher sur Soumettre et Corriger. Pré-rempli par le schéma ; les codes inconnus rencontrés à l'import y sont ajoutés.
+Référentiel des types d'erreur, affiché en cases à cocher sur Soumettre et Lissage. Pré-rempli par le schéma ; les codes inconnus rencontrés à l'import y sont ajoutés.
 
 | Colonne | Type | Description |
 |---|---|---|
@@ -506,7 +507,7 @@ Les trois codes sont vérifiés **côté serveur** par le même mécanisme ([lib
 
 Route sans lien dans la navigation, réservée à la supervision. Elle demande le code `supervision` selon le mécanisme ci-dessus ; le bouton Verrouiller supprime le cookie.
 
-Contenu : totaux du corpus, progression de chaque lot (validés, en attente, rejetés, à corriger), et un tableau par utilisateur (soumis, corrigés, passés, rejetés, votes, contributions validées / en attente / rejetées, dernière activité). Le lien Détail ouvre `/supervision/<users.id>` : le même tableau de bord que celui de l'utilisateur, avec son journal paginé et le bouton Télécharger l'activité, qui livre le JSON complet de cet utilisateur. Chaque téléchargement est journalisé (`activity.export`, avec l'utilisateur visé).
+Contenu : totaux du corpus, progression de chaque lot (validés, en attente, rejetés, à lisser), et un tableau par utilisateur (soumis, corrigés, passés, rejetés, votes, contributions validées / en attente / rejetées, dernière activité). Le lien Détail ouvre `/supervision/<users.id>` : le même tableau de bord que celui de l'utilisateur, avec son journal paginé et le bouton Télécharger l'activité, qui livre le JSON complet de cet utilisateur. Chaque téléchargement est journalisé (`activity.export`, avec l'utilisateur visé).
 
 ## Thème et design
 
@@ -532,7 +533,7 @@ Contenu : totaux du corpus, progression de chaque lot (validés, en attente, rej
 
 Le corpus dépasse 170 000 lignes ; les règles suivantes le gardent fluide.
 
-- **Index partiels adaptés aux requêtes** (section 6 de `scripts/001_create_tables.sql`) : compteurs par statut avec index couvrant, listes par statut du plus récent au plus ancien, file de correction dans l'ordre d'import (tous lots ou par lot), compteurs par lot, contributions par correcteur. Sans eux, la réservation d'un exemple à corriger coûtait plus d'une seconde et les statistiques huit.
+- **Index partiels adaptés aux requêtes** (section 6 de `scripts/001_create_tables.sql`) : compteurs par statut avec index couvrant, listes par statut du plus récent au plus ancien, file de correction dans l'ordre d'import (tous lots ou par lot), compteurs par lot, contributions par correcteur. Sans eux, la réservation d'un exemple à lisser coûtait plus d'une seconde et les statistiques huit.
 - **`ANALYZE` après tout import massif** : le script d'import le fait lui-même et le schéma le refait. Sans statistiques à jour, PostgreSQL ignore les index et parcourt la table entière.
 - **Jamais de liste complète** : les pages lisent des pages de 10, l'export lit par tranches de 2 000 en flux.
 - **Fonctions Vercel à Francfort** (`vercel.json`, région `fra1`), à côté de la base Supabase : chaque requête SQL coûte un aller-retour réseau, et une page en fait plusieurs.
@@ -567,7 +568,11 @@ $env:DATABASE_URL = "postgresql://postgres.<ref>:<mot-de-passe>@aws-0-<region>.p
 yarn db:setup
 ```
 
-Les policies RLS existantes peuvent rester : le rôle `postgres`, propriétaire des tables, n'y est pas soumis. Elles ne protègent plus rien puisque l'API REST n'est plus appelée depuis le navigateur ; la sécurité repose désormais sur le fait que `DATABASE_URL` ne quitte jamais le serveur.
+### Fermeture de l'API REST Supabase
+
+Supabase expose toutes les tables du schéma `public` par son API REST à quiconque possède l'URL du projet et une clé anon. L'application ne passe pas par cette API : elle se connecte en PostgreSQL avec le rôle `postgres`, propriétaire des tables, que le RLS ne concerne pas. La section 7 du schéma ferme donc l'API : RLS activé sur toutes les tables sans aucune policy, anciennes policies publiques de l'époque v0 supprimées, droits retirés aux rôles `anon` et `authenticated` y compris pour les tables futures. Sans effet sur une base locale, où ces rôles n'existent pas.
+
+Deux réglages complémentaires dans le tableau de bord Supabase, que le script ne peut pas faire : Settings → API Keys, désactiver les clés legacy `anon` et `service_role`, plus rien ne les utilise ; et Settings → API → Exposed schemas, retirer `public` pour couper l'API REST entièrement.
 
 ### Étapes
 

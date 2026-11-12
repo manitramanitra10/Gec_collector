@@ -10,6 +10,12 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  async redirects() {
+    return [
+      // Ancienne adresse de la page Lissage.
+      { source: '/correct', destination: '/lissage', permanent: true },
+    ]
+  },
 }
 
 export default nextConfig

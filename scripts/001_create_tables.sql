@@ -250,6 +250,44 @@ CREATE INDEX IF NOT EXISTS idx_examples_corrected_by
 -- PostgreSQL ignore les index et parcourt toute la table.
 ANALYZE examples;
 ANALYZE votes;
+
+-- ---------------------------------------------------------------------------
+-- 7. Verrouillage de l'API REST Supabase.
+--    Supabase expose toutes les tables du schéma public par PostgREST avec la clé
+--    anon. L'application n'utilise pas cette API : elle se connecte en PostgreSQL
+--    comme propriétaire des tables, ce qui ignore le RLS. On active donc le RLS
+--    partout, sans aucune policy (= aucun accès par l'API), on supprime les policies
+--    publiques de l'époque v0 et on retire les droits des rôles REST s'ils existent.
+--    Sans effet sur une base PostgreSQL locale (les rôles anon/authenticated n'y
+--    existent pas).
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['base_entity', 'users', 'batches', 'error_types', 'examples', 'votes', 'secrets', 'activity_log'] LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+  END LOOP;
+END $$;
+
+DROP POLICY IF EXISTS "Allow public read on examples"   ON examples;
+DROP POLICY IF EXISTS "Allow public insert on examples" ON examples;
+DROP POLICY IF EXISTS "Allow public update on examples" ON examples;
+DROP POLICY IF EXISTS "Allow public read on votes"      ON votes;
+DROP POLICY IF EXISTS "Allow public insert on votes"    ON votes;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon')
+     AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    EXECUTE 'REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon, authenticated';
+    EXECUTE 'REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon, authenticated';
+    EXECUTE 'REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon, authenticated';
+    EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated';
+    EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated';
+    EXECUTE 'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON FUNCTIONS FROM anon, authenticated';
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_votes_example_id    ON votes(example_id);
 CREATE INDEX IF NOT EXISTS idx_users_email         ON users(email);
 CREATE INDEX IF NOT EXISTS idx_activity_log_user   ON activity_log(created_by, created_at DESC);

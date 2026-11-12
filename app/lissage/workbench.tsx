@@ -111,7 +111,7 @@ export function CorrectionWorkbench({ errorTypes, initialBatches }: Props) {
       if (result.outcome === "done") {
         await advance("Correction enregistrée, l'exemple est envoyé en validation.")
       } else if (result.outcome === "locked") {
-        setError("Quelqu'un d'autre corrige cet exemple en ce moment. Passez au suivant.")
+        setError("Quelqu'un d'autre lisse cet exemple en ce moment. Passez au suivant.")
       } else if (result.outcome === "not_found") {
         await advance("Cet exemple a déjà été traité par quelqu'un d'autre.")
       } else {
@@ -146,7 +146,7 @@ export function CorrectionWorkbench({ errorTypes, initialBatches }: Props) {
       if (result.outcome === "done" || result.outcome === "not_found") {
         await advance("Exemple rejeté.")
       } else if (result.outcome === "locked") {
-        setError("Quelqu'un d'autre corrige cet exemple en ce moment. Passez au suivant.")
+        setError("Quelqu'un d'autre lisse cet exemple en ce moment. Passez au suivant.")
       } else {
         setError(result.error)
       }
@@ -155,7 +155,7 @@ export function CorrectionWorkbench({ errorTypes, initialBatches }: Props) {
     }
   }
 
-  // Ctrl+Entrée (ou Cmd+Entrée) envoie la correction depuis n'importe quel champ.
+  // Ctrl+Entrée (ou Cmd+Entrée) envoie le lissage depuis n'importe quel champ.
   const onKeyDown = (e: React.KeyboardEvent) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault()
@@ -171,9 +171,9 @@ export function CorrectionWorkbench({ errorTypes, initialBatches }: Props) {
       <div className="mx-auto max-w-3xl px-6">
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Corriger</h1>
+            <h1 className="text-2xl font-bold text-foreground">Lissage</h1>
             <p className="text-muted-foreground">
-              Relisez les exemples importés un par un, corrigez-les, puis envoyez-les en validation.
+              Relisez les exemples importés un par un, lissez-les, puis envoyez-les en validation.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -224,11 +224,11 @@ export function CorrectionWorkbench({ errorTypes, initialBatches }: Props) {
           <Card className="border-border/50 text-center">
             <CardContent className="py-12">
               <CheckCircle2 className="mx-auto h-12 w-12 text-success" />
-              <p className="mt-4 text-lg font-medium text-foreground">Rien à corriger</p>
+              <p className="mt-4 text-lg font-medium text-foreground">Rien à lisser</p>
               <p className="text-muted-foreground">
                 {batchId === ALL_BATCHES
-                  ? "Tous les exemples importés ont été traités, ou sont en cours de correction par d'autres."
-                  : "Ce lot est entièrement traité, ou ses exemples restants sont en cours de correction."}
+                  ? "Tous les exemples importés ont été traités, ou sont en cours de lissage par d'autres."
+                  : "Ce lot est entièrement traité, ou ses exemples restants sont en cours de lissage."}
               </p>
             </CardContent>
           </Card>
@@ -239,10 +239,10 @@ export function CorrectionWorkbench({ errorTypes, initialBatches }: Props) {
                 <div className="space-y-1">
                   <CardTitle className="flex items-center gap-2 text-base font-medium">
                     <PencilLine className="h-4 w-4 text-primary" />
-                    Exemple à corriger
+                    Exemple à lisser
                   </CardTitle>
                   <CardDescription className="text-xs">
-                    Encore {remaining} à corriger
+                    Encore {remaining} à lisser
                     {batchId !== ALL_BATCHES ? " dans ce lot" : ""}. Ctrl+Entrée pour envoyer.
                   </CardDescription>
                 </div>

@@ -166,7 +166,7 @@ export type ClaimActionResult =
   | { ok: true; example: Example | null; remaining: number }
   | { ok: false; error: string }
 
-/** Réserve et renvoie le prochain exemple à corriger, dans le lot demandé ou tous lots confondus. */
+/** Réserve et renvoie le prochain exemple à lisser, dans le lot demandé ou tous lots confondus. */
 export async function claimNextExample(input: z.input<typeof batchFilterSchema>): Promise<ClaimActionResult> {
   const check = await requireUser()
   if (!check.user) return { ok: false, error: check.error }
@@ -217,7 +217,7 @@ export async function correctExample(input: z.input<typeof correctionSchema>): P
     return result.outcome === "done" ? { outcome: "done" } : { outcome: result.outcome }
   } catch (err) {
     console.error("correctExample :", err)
-    return { outcome: "error", error: "Impossible d'enregistrer la correction." }
+    return { outcome: "error", error: "Impossible d'enregistrer le lissage." }
   }
 }
 

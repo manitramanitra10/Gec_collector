@@ -25,7 +25,7 @@ import {
 } from "lucide-react"
 
 export const STATUS_LABELS: Record<ExampleStatus, string> = {
-  to_correct: "À corriger",
+  to_correct: "À lisser",
   pending: "En attente",
   validated: "Validé",
   rejected: "Rejeté",
@@ -45,11 +45,11 @@ function describe(activity: DashboardActivity): { label: string; icon: React.Rea
     case "example.submit":
       return { label: "Exemple soumis", icon: <FileText className="h-4 w-4 text-primary" /> }
     case "example.correct":
-      return { label: "Exemple corrigé et envoyé en validation", icon: <PencilLine className="h-4 w-4 text-primary" /> }
+      return { label: "Exemple lissé et envoyé en validation", icon: <PencilLine className="h-4 w-4 text-primary" /> }
     case "example.skip":
       return { label: "Exemple passé", icon: <SkipForward className="h-4 w-4 text-muted-foreground" /> }
     case "example.reject":
-      return { label: "Exemple rejeté à la correction", icon: <Trash2 className="h-4 w-4 text-destructive" /> }
+      return { label: "Exemple rejeté au lissage", icon: <Trash2 className="h-4 w-4 text-destructive" /> }
     case "example.vote":
       return details.vote === 1
         ? { label: "Vote positif", icon: <ThumbsUp className="h-4 w-4 text-success" /> }
@@ -142,7 +142,7 @@ export function UserDashboardView({ data, pagerHref, perspective = "self" }: Pro
           <StatTile value={data.actions.submitted} label="Exemples soumis" icon={<FileText className="h-5 w-5 text-primary" />} />
           <StatTile
             value={data.actions.corrected}
-            label="Exemples corrigés"
+            label="Exemples lissés"
             icon={<PencilLine className="h-5 w-5 text-primary" />}
             hint={data.actions.skipped ? `${data.actions.skipped} passé(s)` : undefined}
           />
@@ -154,7 +154,7 @@ export function UserDashboardView({ data, pagerHref, perspective = "self" }: Pro
           />
           <StatTile
             value={data.actions.rejectedAtCorrection}
-            label="Rejetés à la correction"
+            label="Rejetés au lissage"
             icon={<XCircle className="h-5 w-5 text-destructive" />}
             hint={data.actions.imports ? `${data.actions.imports} lot(s) importé(s)` : undefined}
           />
@@ -193,8 +193,8 @@ export function UserDashboardView({ data, pagerHref, perspective = "self" }: Pro
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              Contributions = exemples soumis ou corrigés, hors ceux rejetés par l'utilisateur lui-même à la
-              correction.
+              Contributions = exemples soumis ou lissés, hors ceux rejetés par l'utilisateur lui-même au
+              lissage.
             </p>
           </CardContent>
         </Card>
@@ -208,14 +208,14 @@ export function UserDashboardView({ data, pagerHref, perspective = "self" }: Pro
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <PencilLine className="h-4 w-4 text-primary" />
-                  {data.todo.toCorrect} à corriger
+                  {data.todo.toCorrect} à lisser
                 </CardTitle>
                 <CardDescription>Exemples importés en attente de relecture.</CardDescription>
               </CardHeader>
               <CardContent>
                 <Button asChild variant="ghost" className="gap-2 px-0 text-primary hover:text-primary/80">
-                  <Link href="/correct">
-                    Corriger
+                  <Link href="/lissage">
+                    Lisser
                     <ArrowRight className="h-4 w-4" />
                   </Link>
                 </Button>

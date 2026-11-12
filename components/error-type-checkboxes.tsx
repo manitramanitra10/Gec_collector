@@ -11,7 +11,7 @@ interface Props {
   disabled?: boolean
 }
 
-/** Cases à cocher des types d'erreur, partagées par Soumettre et Corriger. */
+/** Cases à cocher des types d'erreur, partagées par Soumettre et Lissage. */
 export function ErrorTypeCheckboxes({ errorTypes, selected, onChange, disabled }: Props) {
   if (errorTypes.length === 0) {
     return <p className="text-xs text-muted-foreground">Aucun type d'erreur défini dans le référentiel.</p>

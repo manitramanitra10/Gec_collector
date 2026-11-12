@@ -22,15 +22,18 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet"
 import { cn } from "@/lib/utils"
-import { ChevronDown, LayoutDashboard, LogOut, Menu, Sparkles, UserRound } from "lucide-react"
+import { ChevronDown, LayoutDashboard, LogIn, LogOut, Menu, Sparkles, UserRound } from "lucide-react"
 import type { SessionUser } from "@/lib/types"
 
 const NAV_LINKS = [
   { href: "/submit", label: "Soumettre" },
-  { href: "/correct", label: "Corriger" },
+  { href: "/lissage", label: "Lissage" },
   { href: "/review", label: "Valider" },
   { href: "/export", label: "Exporter" },
 ]
+
+/** Lien de connexion : balise brute, car /auth/login est une route du SDK à ne pas précharger. */
+const LOGIN_HREF = "/auth/login?returnTo=/"
 
 /** Initiales affichées quand l'avatar Google n'est pas disponible. */
 function initials(user: SessionUser): string {
@@ -76,11 +79,16 @@ export function Header({ user }: { user: SessionUser | null }) {
             ))}
           </nav>
 
-          {user && (
-            <>
-              <div className="mx-1 h-6 w-px bg-border/60" aria-hidden />
-              <UserMenu user={user} />
-            </>
+          <div className="mx-1 h-6 w-px bg-border/60" aria-hidden />
+          {user ? (
+            <UserMenu user={user} />
+          ) : (
+            <Button asChild size="sm" className="gap-2 font-medium">
+              <a href={LOGIN_HREF}>
+                <LogIn className="size-4" />
+                Se connecter
+              </a>
+            </Button>
           )}
         </div>
 
@@ -196,6 +204,16 @@ function MobileMenu({ user, pathname }: { user: SessionUser | null; pathname: st
               </Link>
             </SheetClose>
           ))}
+
+          {!user && (
+            <>
+              <div className="my-2 h-px bg-border/60" aria-hidden />
+              <a href={LOGIN_HREF} className={cn(itemClass, "bg-primary text-primary-foreground hover:bg-primary/90")}>
+                <LogIn className="size-4" />
+                Se connecter
+              </a>
+            </>
+          )}
 
           {user && (
             <>
